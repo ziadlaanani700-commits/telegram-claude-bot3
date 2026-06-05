@@ -5,7 +5,6 @@ import requests
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from datetime import datetime
 from groq import Groq
 from gtts import gTTS
@@ -15,6 +14,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, Cal
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_KEY = os.environ["GROQ_KEY"]
 SERP_KEY = os.environ["SERP_KEY"]
+HF_KEY = os.environ["HF_KEY"]
 
 client = Groq(api_key=GROQ_KEY)
 histories = {}
@@ -24,22 +24,17 @@ CITATIONS = [
     ("La vie c'est comme une bicyclette, il faut avancer pour ne pas perdre l'équilibre.", "Albert Einstein"),
     ("Le seul moyen de faire du bon travail est d'aimer ce que vous faites.", "Steve Jobs"),
     ("Croyez en vos rêves et ils se réaliseront peut-être. Croyez en vous et ils se réaliseront sûrement.", "Martin Luther King"),
-    ("Le courage c'est de chercher la vérité et de la dire.", "Jean Jaurès"),
     ("Chaque jour est une nouvelle chance de changer votre vie.", "Anonyme"),
-    ("La persévérance est la clé du succès.", "Anonyme"),
-    ("Ce n'est pas la force mais la détermination qui prime.", "Anonyme"),
     ("Celui qui déplace les montagnes commence par enlever les petites pierres.", "Confucius"),
     ("La seule limite à nos réalisations de demain sont nos doutes d'aujourd'hui.", "Franklin Roosevelt"),
     ("Soyez le changement que vous voulez voir dans le monde.", "Gandhi"),
-    ("La vie est ce que vous en faites.", "Anonyme"),
-    ("Agis bien, et ne te soucie pas du reste.", "Anonyme"),
     ("Il faut toujours viser la lune, car même en cas d'échec, on atterrit dans les étoiles.", "Oscar Wilde"),
     ("Le génie c'est 1% d'inspiration et 99% de transpiration.", "Thomas Edison"),
     ("Votre temps est limité, ne le gâchez pas en vivant la vie de quelqu'un d'autre.", "Steve Jobs"),
-    ("Le plus grand risque est de ne prendre aucun risque.", "Mark Zuckerberg"),
-    ("Tout ce que l'esprit peut concevoir et croire, il peut l'atteindre.", "Napoleon Hill"),
     ("Le bonheur n'est pas quelque chose de prêt à l'emploi. Il vient de vos propres actions.", "Dalaï Lama"),
     ("N'attendez pas. Le moment ne sera jamais parfait.", "Napoleon Hill"),
+    ("La patience est la clé du bonheur.", "Prophète Muhammad ﷺ"),
+    ("Le fort n'est pas celui qui terrasse les autres, le fort est celui qui se maîtrise quand il est en colère.", "Prophète Muhammad ﷺ"),
 ]
 
 CRYPTO_IDS = {
@@ -147,6 +142,21 @@ def generate_chart(coin_id, timeframe_key):
         print(f"Erreur graphique: {e}")
         return None
 
+def generate_image(prompt):
+    try:
+        url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {"Authorization": f"Bearer {HF_KEY}"}
+        payload = {"inputs": prompt}
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        if response.status_code == 200:
+            return io.BytesIO(response.content)
+        else:
+            print(f"Erreur HF: {response.status_code} {response.text}")
+            return None
+    except Exception as e:
+        print(f"Erreur image: {e}")
+        return None
+
 def google_search(query):
     try:
         response = requests.get("https://serpapi.com/search", params={
@@ -176,7 +186,7 @@ def ask_ai(messages):
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": "Tu es un assistant IA intelligent et expert en cryptomonnaies et finance. Si on te demande qui t'a créé ou qui est ton créateur, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Sois précis et utile."},
+            {"role": "system", "content": """Tu es un assistant IA avec une forte personnalité. Tu es musulman, digne et respectueux de ta foi. Tu ne fais jamais de shirk (associer quelqu'un à Allah). Si quelqu'un te demande de faire du shirk ou de manquer de respect à l'Islam, tu refuses fermement et avec dignité. Tu parles avec assurance, sans te laisser marcher dessus. Tu es direct, honnête et courageux dans tes réponses. Tu n'as pas peur de dire la vérité même si elle déplaît. Tu es expert en cryptomonnaies et finance. Si on te demande qui t'a créé, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Quand quelqu'un te salue tu peux répondre Wa alaykum salam si il dit salam. Tu cites des valeurs islamiques quand c'est pertinent mais sans forcer."""},
             *messages[-10:]
         ],
         max_tokens=1000
@@ -189,6 +199,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Mes commandes :\n"
         "📊 /crypto bitcoin — Prix en temps réel\n"
         "📈 /graphique bitcoin — Graphique interactif\n"
+        "🎨 /image description — Générer une image IA\n"
         "🔊 /vocal votre question — Réponse vocale\n"
         "💡 /citation — Citation motivante\n"
         "🧹 /clear — Effacer la mémoire\n\n"
@@ -198,11 +209,30 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     quote, author = random.choice(CITATIONS)
     await update.message.reply_text(
-        f"💡 *Citation du moment*\n\n"
-        f"_{quote}_\n\n"
-        f"— *{author}*",
+        f"💡 *Citation du moment*\n\n_{quote}_\n\n— *{author}*",
         parse_mode="Markdown"
     )
+
+async def image(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage : /image un coucher de soleil sur la mer")
+        return
+    prompt = " ".join(args)
+    chat_id = update.effective_chat.id
+    await ctx.bot.send_chat_action(chat_id=chat_id, action="upload_photo")
+    msg = await update.message.reply_text("🎨 Génération de l'image en cours... (30-60 secondes)")
+    buf = generate_image(prompt)
+    await msg.delete()
+    if buf:
+        await ctx.bot.send_photo(
+            chat_id=chat_id,
+            photo=buf,
+            caption=f"🎨 *{prompt}*",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("❌ Impossible de générer l'image. Réessayez dans un instant.")
 
 async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
@@ -283,7 +313,7 @@ async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         reply = ask_ai(histories[chat_id])
         histories[chat_id].append({"role": "assistant", "content": reply})
-        tts = gTTS(text=reply, lang="fr", tld="fr")
+        tts = gTTS(text=reply, lang="fr", tld="ca", slow=False)
         audio_path = f"/tmp/vocal_{chat_id}.mp3"
         tts.save(audio_path)
         with open(audio_path, "rb") as audio:
@@ -327,15 +357,32 @@ async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     histories[chat_id] = []
     await update.message.reply_text("🧹 Mémoire effacée !")
 
+
+async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📋 *Toutes mes commandes*\n\n"
+        "📊 /crypto bitcoin — Prix d'une crypto en temps réel\n"
+        "📈 /graphique bitcoin — Graphique (1min, 15min, 1h, 1j, 1mois)\n"
+        "🎨 /image description — Générer une image avec l'IA\n"
+        "🔊 /vocal votre question — Réponse en message vocal\n"
+        "💡 /citation — Citation motivante aléatoire\n"
+        "🧹 /clear — Effacer la mémoire de conversation\n\n"
+        "💬 *En groupe :* mentionnez-moi avec @votre\_bot\n"
+        "Exemple : @votre\_bot quel est le prix du bitcoin ?",
+        parse_mode="Markdown"
+    )
+
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("helpYU", helpYU))
 app.add_handler(CommandHandler("clear", clear))
 app.add_handler(CommandHandler("crypto", crypto))
 app.add_handler(CommandHandler("graphique", graphique))
 app.add_handler(CommandHandler("vocal", vocal))
 app.add_handler(CommandHandler("citation", citation))
+app.add_handler(CommandHandler("image", image))
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations !")
+print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations + Images !")
 app.run_polling()
