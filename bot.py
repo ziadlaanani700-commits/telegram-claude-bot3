@@ -1,5 +1,6 @@
 import os
 import io
+import random
 import requests
 import matplotlib
 matplotlib.use('Agg')
@@ -17,6 +18,29 @@ SERP_KEY = os.environ["SERP_KEY"]
 
 client = Groq(api_key=GROQ_KEY)
 histories = {}
+
+CITATIONS = [
+    ("Le succès c'est d'aller d'échec en échec sans perdre son enthousiasme.", "Winston Churchill"),
+    ("La vie c'est comme une bicyclette, il faut avancer pour ne pas perdre l'équilibre.", "Albert Einstein"),
+    ("Le seul moyen de faire du bon travail est d'aimer ce que vous faites.", "Steve Jobs"),
+    ("Croyez en vos rêves et ils se réaliseront peut-être. Croyez en vous et ils se réaliseront sûrement.", "Martin Luther King"),
+    ("Le courage c'est de chercher la vérité et de la dire.", "Jean Jaurès"),
+    ("Chaque jour est une nouvelle chance de changer votre vie.", "Anonyme"),
+    ("La persévérance est la clé du succès.", "Anonyme"),
+    ("Ce n'est pas la force mais la détermination qui prime.", "Anonyme"),
+    ("Celui qui déplace les montagnes commence par enlever les petites pierres.", "Confucius"),
+    ("La seule limite à nos réalisations de demain sont nos doutes d'aujourd'hui.", "Franklin Roosevelt"),
+    ("Soyez le changement que vous voulez voir dans le monde.", "Gandhi"),
+    ("La vie est ce que vous en faites.", "Anonyme"),
+    ("Agis bien, et ne te soucie pas du reste.", "Anonyme"),
+    ("Il faut toujours viser la lune, car même en cas d'échec, on atterrit dans les étoiles.", "Oscar Wilde"),
+    ("Le génie c'est 1% d'inspiration et 99% de transpiration.", "Thomas Edison"),
+    ("Votre temps est limité, ne le gâchez pas en vivant la vie de quelqu'un d'autre.", "Steve Jobs"),
+    ("Le plus grand risque est de ne prendre aucun risque.", "Mark Zuckerberg"),
+    ("Tout ce que l'esprit peut concevoir et croire, il peut l'atteindre.", "Napoleon Hill"),
+    ("Le bonheur n'est pas quelque chose de prêt à l'emploi. Il vient de vos propres actions.", "Dalaï Lama"),
+    ("N'attendez pas. Le moment ne sera jamais parfait.", "Napoleon Hill"),
+]
 
 CRYPTO_IDS = {
     "bitcoin": "bitcoin", "btc": "bitcoin",
@@ -37,11 +61,11 @@ CRYPTO_IDS = {
 }
 
 TIMEFRAMES = {
-    "1m":  {"days": "1",   "interval": "minutely", "label": "1 Minute",  "points": 1},
-    "15m": {"days": "1",   "interval": "minutely", "label": "15 Minutes","points": 15},
-    "1h":  {"days": "1",   "interval": "hourly",   "label": "1 Heure",   "points": 1},
-    "1j":  {"days": "1",   "interval": "hourly",   "label": "1 Jour",    "points": 24},
-    "1mo": {"days": "30",  "interval": "daily",    "label": "1 Mois",    "points": 30},
+    "1m":  {"days": "1",  "interval": "minutely", "label": "1 Minute"},
+    "15m": {"days": "1",  "interval": "minutely", "label": "15 Minutes"},
+    "1h":  {"days": "1",  "interval": "hourly",   "label": "1 Heure"},
+    "1j":  {"days": "1",  "interval": "hourly",   "label": "1 Jour"},
+    "1mo": {"days": "30", "interval": "daily",    "label": "1 Mois"},
 }
 
 def find_coin_id(query):
@@ -79,51 +103,33 @@ def get_crypto_price(query):
     except:
         return None
 
-def generate_chart(coin_id, coin_name, timeframe_key):
+def generate_chart(coin_id, timeframe_key):
     try:
         tf = TIMEFRAMES[timeframe_key]
-        days = tf["days"]
-        interval = tf["interval"]
-        label = tf["label"]
-
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-        params = {"vs_currency": "usd", "days": days, "interval": interval}
+        params = {"vs_currency": "usd", "days": tf["days"], "interval": tf["interval"]}
         response = requests.get(url, params=params, timeout=15)
         data = response.json()
         prices = data.get("prices", [])
-
         if not prices:
             return None
-
-        # Réduire les points selon le timeframe
-        points = tf["points"]
         if timeframe_key == "1m":
             prices = prices[-2:]
         elif timeframe_key == "15m":
             prices = prices[-16:]
-
         timestamps = [datetime.utcfromtimestamp(p[0] / 1000) for p in prices]
         values = [p[1] for p in prices]
-
         color = "#00C896" if values[-1] >= values[0] else "#FF4B6E"
-
         fig, ax = plt.subplots(figsize=(10, 5))
         fig.patch.set_facecolor("#0E0E1A")
         ax.set_facecolor("#0E0E1A")
-
         ax.plot(timestamps, values, color=color, linewidth=2)
         ax.fill_between(timestamps, values, alpha=0.15, color=color)
-
-        ax.set_title(f"{coin_name} — {label}", color="white", fontsize=14, pad=15)
+        ax.set_title(f"{coin_id.upper()} — {tf['label']}", color="white", fontsize=14, pad=15)
         ax.tick_params(colors="gray")
-        ax.yaxis.set_tick_params(labelcolor="gray")
-        ax.xaxis.set_tick_params(labelcolor="gray")
-
         for spine in ax.spines.values():
             spine.set_edgecolor("#2A2A3E")
-
         ax.grid(color="#2A2A3E", linestyle="--", linewidth=0.5)
-
         change = ((values[-1] - values[0]) / values[0]) * 100
         arrow = "▲" if change >= 0 else "▼"
         change_color = "#00C896" if change >= 0 else "#FF4B6E"
@@ -131,15 +137,12 @@ def generate_chart(coin_id, coin_name, timeframe_key):
                 color=change_color, fontsize=12, verticalalignment='top')
         ax.text(0.98, 0.95, f"${values[-1]:,.4f}", transform=ax.transAxes,
                 color="white", fontsize=12, verticalalignment='top', horizontalalignment='right')
-
         plt.tight_layout()
-
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=120, facecolor="#0E0E1A")
         buf.seek(0)
         plt.close()
         return buf
-
     except Exception as e:
         print(f"Erreur graphique: {e}")
         return None
@@ -187,8 +190,18 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "📊 /crypto bitcoin — Prix en temps réel\n"
         "📈 /graphique bitcoin — Graphique interactif\n"
         "🔊 /vocal votre question — Réponse vocale\n"
+        "💡 /citation — Citation motivante\n"
         "🧹 /clear — Effacer la mémoire\n\n"
         "Dans un groupe, mentionnez-moi avec @nom_du_bot !"
+    )
+
+async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    quote, author = random.choice(CITATIONS)
+    await update.message.reply_text(
+        f"💡 *Citation du moment*\n\n"
+        f"_{quote}_\n\n"
+        f"— *{author}*",
+        parse_mode="Markdown"
     )
 
 async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -211,9 +224,8 @@ async def graphique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = " ".join(args)
     coin_id = find_coin_id(query)
     if not coin_id:
-        await update.message.reply_text("❌ Crypto non trouvée. Essayez : bitcoin, ethereum, solana...")
+        await update.message.reply_text("❌ Crypto non trouvée.")
         return
-
     keyboard = [
         [
             InlineKeyboardButton("1 min", callback_data=f"chart_{coin_id}_1m"),
@@ -225,25 +237,21 @@ async def graphique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("1 mois", callback_data=f"chart_{coin_id}_1mo"),
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
         f"📈 Choisissez la période pour *{coin_id.upper()}* :",
-        reply_markup=reply_markup,
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
 
 async def chart_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     parts = query.data.split("_")
     coin_id = parts[1]
     timeframe = parts[2]
     label = TIMEFRAMES[timeframe]["label"]
-
     await query.message.reply_text(f"⏳ Génération du graphique {label}...")
-
-    buf = generate_chart(coin_id, coin_id.upper(), timeframe)
+    buf = generate_chart(coin_id, timeframe)
     if buf:
         await ctx.bot.send_photo(
             chat_id=query.message.chat_id,
@@ -252,7 +260,7 @@ async def chart_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     else:
-        await query.message.reply_text("❌ Impossible de générer le graphique. Réessayez.")
+        await query.message.reply_text("❌ Impossible de générer le graphique.")
 
 async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
@@ -325,8 +333,9 @@ app.add_handler(CommandHandler("clear", clear))
 app.add_handler(CommandHandler("crypto", crypto))
 app.add_handler(CommandHandler("graphique", graphique))
 app.add_handler(CommandHandler("vocal", vocal))
+app.add_handler(CommandHandler("citation", citation))
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal !")
+print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations !")
 app.run_polling()
