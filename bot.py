@@ -176,7 +176,7 @@ def ask_ai(messages):
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": "Tu es un assistant IA intelligent créé par Ziad Laanani. Tu es expert en cryptomonnaies et finance. Si on te demande qui t'a créé, tu réponds Ziad Laanani. Tu réponds en français sauf si on te parle autrement. Sois précis et utile."},
+            {"role": "system", "content": "Tu es un assistant IA intelligent et expert en cryptomonnaies et finance. Si on te demande qui t'a créé ou qui est ton créateur, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Sois précis et utile."},
             *messages[-10:]
         ],
         max_tokens=1000
@@ -185,7 +185,7 @@ def ask_ai(messages):
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Bonjour ! Je suis un assistant IA créé par Ziad Laanani.\n\n"
+        "👋 Bonjour ! Je suis un assistant IA.\n\n"
         "Mes commandes :\n"
         "📊 /crypto bitcoin — Prix en temps réel\n"
         "📈 /graphique bitcoin — Graphique interactif\n"
