@@ -2,4 +2,3 @@ groq
 python-telegram-bot
 requests
 gTTS
-matplotlib
