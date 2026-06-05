@@ -14,7 +14,6 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, Cal
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_KEY = os.environ["GROQ_KEY"]
 SERP_KEY = os.environ["SERP_KEY"]
-HF_KEY = os.environ["HF_KEY"]
 
 client = Groq(api_key=GROQ_KEY)
 histories = {}
@@ -142,21 +141,6 @@ def generate_chart(coin_id, timeframe_key):
         print(f"Erreur graphique: {e}")
         return None
 
-def generate_image(prompt):
-    try:
-        url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        headers = {"Authorization": f"Bearer {HF_KEY}"}
-        payload = {"inputs": prompt}
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        if response.status_code == 200:
-            return io.BytesIO(response.content)
-        else:
-            print(f"Erreur HF: {response.status_code} {response.text}")
-            return None
-    except Exception as e:
-        print(f"Erreur image: {e}")
-        return None
-
 def google_search(query):
     try:
         response = requests.get("https://serpapi.com/search", params={
@@ -196,14 +180,20 @@ def ask_ai(messages):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Bonjour ! Je suis un assistant IA.\n\n"
-        "Mes commandes :\n"
-        "📊 /crypto bitcoin — Prix en temps réel\n"
-        "📈 /graphique bitcoin — Graphique interactif\n"
-        "🎨 /image description — Générer une image IA\n"
-        "🔊 /vocal votre question — Réponse vocale\n"
-        "💡 /citation — Citation motivante\n"
-        "🧹 /clear — Effacer la mémoire\n\n"
-        "Dans un groupe, mentionnez-moi avec @nom_du_bot !"
+        "Tape /helpYU pour voir toutes mes commandes !"
+    )
+
+async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📋 *Toutes mes commandes*\n\n"
+        "📊 /crypto bitcoin — Prix d'une crypto en temps réel\n"
+        "📈 /graphique bitcoin — Graphique (1min, 15min, 1h, 1j, 1mois)\n"
+        "🔊 /vocal votre question — Réponse en message vocal\n"
+        "💡 /citation — Citation motivante aléatoire\n"
+        "🧹 /clear — Effacer la mémoire de conversation\n\n"
+        "💬 *En groupe :* mentionnez-moi avec @votre\\_bot\n"
+        "Exemple : @votre\\_bot quel est le prix du bitcoin ?",
+        parse_mode="Markdown"
     )
 
 async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -212,27 +202,6 @@ async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"💡 *Citation du moment*\n\n_{quote}_\n\n— *{author}*",
         parse_mode="Markdown"
     )
-
-async def image(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
-        await update.message.reply_text("Usage : /image un coucher de soleil sur la mer")
-        return
-    prompt = " ".join(args)
-    chat_id = update.effective_chat.id
-    await ctx.bot.send_chat_action(chat_id=chat_id, action="upload_photo")
-    msg = await update.message.reply_text("🎨 Génération de l'image en cours... (30-60 secondes)")
-    buf = generate_image(prompt)
-    await msg.delete()
-    if buf:
-        await ctx.bot.send_photo(
-            chat_id=chat_id,
-            photo=buf,
-            caption=f"🎨 *{prompt}*",
-            parse_mode="Markdown"
-        )
-    else:
-        await update.message.reply_text("❌ Impossible de générer l'image. Réessayez dans un instant.")
 
 async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
@@ -357,21 +326,6 @@ async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     histories[chat_id] = []
     await update.message.reply_text("🧹 Mémoire effacée !")
 
-
-async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📋 *Toutes mes commandes*\n\n"
-        "📊 /crypto bitcoin — Prix d'une crypto en temps réel\n"
-        "📈 /graphique bitcoin — Graphique (1min, 15min, 1h, 1j, 1mois)\n"
-        "🎨 /image description — Générer une image avec l'IA\n"
-        "🔊 /vocal votre question — Réponse en message vocal\n"
-        "💡 /citation — Citation motivante aléatoire\n"
-        "🧹 /clear — Effacer la mémoire de conversation\n\n"
-        "💬 *En groupe :* mentionnez-moi avec @votre\_bot\n"
-        "Exemple : @votre\_bot quel est le prix du bitcoin ?",
-        parse_mode="Markdown"
-    )
-
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("helpYU", helpYU))
@@ -380,9 +334,8 @@ app.add_handler(CommandHandler("crypto", crypto))
 app.add_handler(CommandHandler("graphique", graphique))
 app.add_handler(CommandHandler("vocal", vocal))
 app.add_handler(CommandHandler("citation", citation))
-app.add_handler(CommandHandler("image", image))
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations + Images !")
+print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations !")
 app.run_polling()
