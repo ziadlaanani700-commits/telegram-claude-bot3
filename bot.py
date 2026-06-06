@@ -215,32 +215,78 @@ def generate_chart(coin_id, timeframe_key):
         prices = data.get("prices", [])
         if not prices:
             return None
+
         if timeframe_key == "1m":
-            prices = prices[-2:]
+            prices = prices[-60:]
         elif timeframe_key == "15m":
-            prices = prices[-16:]
-        timestamps = [datetime.utcfromtimestamp(p[0]/1000) for p in prices]
-        values = [p[1] for p in prices]
-        color = "#00C896" if values[-1] >= values[0] else "#FF4B6E"
-        fig, ax = plt.subplots(figsize=(10, 5))
+            prices = prices[-60:]
+        elif timeframe_key == "1h":
+            prices = prices[-24:]
+
+        # Grouper en bougies
+        def make_candles(prices, n):
+            candles = []
+            for i in range(0, len(prices) - n, n):
+                chunk = prices[i:i+n]
+                ts = datetime.utcfromtimestamp(chunk[len(chunk)//2][0]/1000)
+                vals = [p[1] for p in chunk]
+                candles.append({
+                    "time": ts,
+                    "open": vals[0],
+                    "high": max(vals),
+                    "low": min(vals),
+                    "close": vals[-1],
+                })
+            return candles
+
+        # Taille des groupes selon timeframe
+        group = {"1m": 1, "15m": 5, "1h": 2, "1j": 4, "1mo": 2}.get(timeframe_key, 2)
+        candles = make_candles(prices, group)
+
+        if not candles:
+            return None
+
+        fig, ax = plt.subplots(figsize=(12, 6))
         fig.patch.set_facecolor("#0E0E1A")
         ax.set_facecolor("#0E0E1A")
-        ax.plot(timestamps, values, color=color, linewidth=2)
-        ax.fill_between(timestamps, values, alpha=0.15, color=color)
+
+        for i, c in enumerate(candles):
+            color = "#00C896" if c["close"] >= c["open"] else "#FF4B6E"
+            # Mèche haute et basse
+            ax.plot([i, i], [c["low"], c["high"]], color=color, linewidth=1)
+            # Corps de la bougie
+            body_bottom = min(c["open"], c["close"])
+            body_height = abs(c["close"] - c["open"])
+            ax.bar(i, body_height, bottom=body_bottom, color=color, width=0.6, linewidth=0)
+
+        # Labels sur l'axe X
+        step = max(1, len(candles) // 6)
+        ax.set_xticks(range(0, len(candles), step))
+        ax.set_xticklabels(
+            [candles[i]["time"].strftime("%H:%M" if timeframe_key in ["1m","15m","1h","1j"] else "%d/%m")
+             for i in range(0, len(candles), step)],
+            color="gray", fontsize=8, rotation=20
+        )
+
+        last = candles[-1]["close"]
+        first = candles[0]["open"]
+        change = ((last - first) / first) * 100
+        arrow = "▲" if change >= 0 else "▼"
+        change_color = "#00C896" if change >= 0 else "#FF4B6E"
+
         ax.set_title(f"{coin_id.upper()} — {tf['label']}", color="white", fontsize=14, pad=15)
-        ax.tick_params(colors="gray")
+        ax.tick_params(axis="y", colors="gray")
         for spine in ax.spines.values():
             spine.set_edgecolor("#2A2A3E")
-        ax.grid(color="#2A2A3E", linestyle="--", linewidth=0.5)
-        change = ((values[-1] - values[0]) / values[0]) * 100
-        arrow = "▲" if change >= 0 else "▼"
-        ax.text(0.02, 0.95, f"{arrow} {abs(change):.2f}%", transform=ax.transAxes,
-                color=color, fontsize=12, verticalalignment='top')
-        ax.text(0.98, 0.95, f"${values[-1]:,.4f}", transform=ax.transAxes,
-                color="white", fontsize=12, verticalalignment='top', horizontalalignment='right')
+        ax.grid(color="#2A2A3E", linestyle="--", linewidth=0.4, alpha=0.5)
+        ax.text(0.02, 0.97, f"{arrow} {abs(change):.2f}%", transform=ax.transAxes,
+                color=change_color, fontsize=13, verticalalignment="top", fontweight="bold")
+        ax.text(0.98, 0.97, f"${last:,.4f}", transform=ax.transAxes,
+                color="white", fontsize=13, verticalalignment="top", horizontalalignment="right", fontweight="bold")
+
         plt.tight_layout()
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=120, facecolor="#0E0E1A")
+        plt.savefig(buf, format="png", dpi=130, facecolor="#0E0E1A")
         buf.seek(0)
         plt.close()
         return buf
@@ -266,6 +312,74 @@ def needs_search(text):
 def is_crypto_query(text):
     return any(w in text.lower() for w in ["crypto", "prix", "price", "coin", "token", "blockchain"] + list(CRYPTO_IDS.keys()))
 
+
+def get_news(query):
+    try:
+        data = requests.get("https://serpapi.com/search", params={
+            "q": f"{query} crypto news",
+            "api_key": SERP_KEY,
+            "num": 5,
+            "hl": "fr",
+            "tbm": "nws"
+        }, timeout=10).json()
+        results = data.get("news_results", [])
+        if not results:
+            return None
+        text = f"📰 *News — {query.upper()}*\n\n"
+        for r in results[:4]:
+            text += f"• {r.get('title', '')}\n"
+        return text
+    except Exception as e:
+        print(f"News error: {e}")
+        return None
+
+def get_volume(query):
+    try:
+        coin_id = find_coin_id(query)
+        if not coin_id:
+            return None
+        data = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}", timeout=10).json()
+        volume = data["market_data"]["total_volume"]["usd"]
+        mcap = data["market_data"]["market_cap"]["usd"]
+        ratio = (volume / mcap) * 100 if mcap else 0
+        name = data["name"]
+        symbol = data["symbol"].upper()
+        emoji = "🔥" if ratio > 10 else "📊"
+        return (
+            f"💧 *Volume — {name} ({symbol})*\n\n"
+            f"{emoji} Volume 24h : *${volume:,.0f}*\n"
+            f"🏦 Market Cap : *${mcap:,.0f}*\n"
+            f"📊 Ratio Vol/MCap : *{ratio:.2f}%*\n\n"
+            f"{'🔥 Volume élevé — activité intense !' if ratio > 10 else '😴 Volume normal.'}"
+        )
+    except Exception as e:
+        print(f"Volume error: {e}")
+        return None
+
+# Stockage alertes et portefeuille en mémoire
+alerts = {}  # {chat_id: [{coin_id, price, direction}]}
+portfolios = {}  # {chat_id: {coin_id: amount}}
+
+def get_portfolio_value(chat_id):
+    if chat_id not in portfolios or not portfolios[chat_id]:
+        return None
+    total = 0
+    lines = []
+    for coin_id, amount in portfolios[chat_id].items():
+        try:
+            data = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}", timeout=10).json()
+            price = data["market_data"]["current_price"]["usd"]
+            value = price * amount
+            total += value
+            name = data["name"]
+            lines.append(f"• *{name}* : {amount} × ${price:,.4f} = *${value:,.2f}*")
+        except:
+            lines.append(f"• {coin_id} : erreur")
+    result = "💼 *Mon Portefeuille*\n\n"
+    result += "\n".join(lines)
+    result += f"\n\n💰 *Total : ${total:,.2f}*"
+    return result
+
 def ask_ai(messages):
     return client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -279,9 +393,9 @@ def ask_ai(messages):
 # =================== COMMANDES ===================
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salam. Tape /helpYU pour voir ce que je sais faire.")
+    await update.message.reply_text("Salam. Tape /infoYU pour voir ce que je sais faire.")
 
-async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def infoYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📋 *Toutes mes commandes*\n\n"
         "━━━ 💹 *CRYPTO* ━━━\n"
@@ -471,6 +585,229 @@ async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     histories[update.effective_chat.id] = []
     await update.message.reply_text("🧹 Mémoire effacée.")
 
+
+async def news(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /news bitcoin")
+        return
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_news(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Aucune news trouvée.", parse_mode="Markdown")
+
+async def volume(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /volume bitcoin")
+        return
+    result = get_volume(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Crypto non trouvée.", parse_mode="Markdown")
+
+async def alerte(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) < 2:
+        await update.message.reply_text("Usage : /alerte bitcoin 100000")
+        return
+    chat_id = update.effective_chat.id
+    coin_id = find_coin_id(ctx.args[0])
+    if not coin_id:
+        await update.message.reply_text("❌ Crypto non trouvée.")
+        return
+    try:
+        target = float(ctx.args[1])
+        if chat_id not in alerts:
+            alerts[chat_id] = []
+        alerts[chat_id].append({"coin_id": coin_id, "target": target})
+        await update.message.reply_text(
+            f"🔔 Alerte créée !\n*{coin_id.upper()}* → ${target:,.2f}",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text("❌ Prix invalide.")
+
+async def check_alerts(ctx):
+    for chat_id, alert_list in list(alerts.items()):
+        for alert in list(alert_list):
+            try:
+                data = requests.get(f"https://api.coingecko.com/api/v3/coins/{alert['coin_id']}", timeout=10).json()
+                price = data["market_data"]["current_price"]["usd"]
+                if price >= alert["target"]:
+                    await ctx.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"🔔 *ALERTE PRIX !*\n\n*{alert['coin_id'].upper()}* a atteint *${price:,.4f}*\nObjectif : ${alert['target']:,.2f} ✅",
+                        parse_mode="Markdown"
+                    )
+                    alert_list.remove(alert)
+            except:
+                pass
+
+async def ajout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) < 2:
+        await update.message.reply_text("Usage : /ajout bitcoin 0.5")
+        return
+    chat_id = update.effective_chat.id
+    coin_id = find_coin_id(ctx.args[0])
+    if not coin_id:
+        await update.message.reply_text("❌ Crypto non trouvée.")
+        return
+    try:
+        amount = float(ctx.args[1])
+        if chat_id not in portfolios:
+            portfolios[chat_id] = {}
+        portfolios[chat_id][coin_id] = portfolios[chat_id].get(coin_id, 0) + amount
+        await update.message.reply_text(
+            f"✅ *{amount} {coin_id.upper()}* ajouté au portefeuille !",
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text("❌ Montant invalide.")
+
+async def portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_portfolio_value(update.effective_chat.id)
+    await update.message.reply_text(result or "❌ Portefeuille vide. Utilisez /ajout bitcoin 0.5", parse_mode="Markdown")
+
+async def reset_portfolio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    portfolios[update.effective_chat.id] = {}
+    await update.message.reply_text("🗑️ Portefeuille réinitialisé.")
+
+
+
+async def heure(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /heure Tokyo")
+        return
+    city = " ".join(ctx.args).lower()
+    from datetime import datetime, timezone, timedelta
+    
+    TIMEZONES = {
+        "tokyo": ("Tokyo 🇯🇵", 9), "japon": ("Tokyo 🇯🇵", 9),
+        "paris": ("Paris 🇫🇷", 1), "france": ("Paris 🇫🇷", 1),
+        "bruxelles": ("Bruxelles 🇧🇪", 1), "belgique": ("Bruxelles 🇧🇪", 1),
+        "london": ("Londres 🇬🇧", 0), "londres": ("Londres 🇬🇧", 0),
+        "new york": ("New York 🇺🇸", -5), "newyork": ("New York 🇺🇸", -5),
+        "los angeles": ("Los Angeles 🇺🇸", -8), "dubai": ("Dubai 🇦🇪", 4),
+        "moscou": ("Moscou 🇷🇺", 3), "moscow": ("Moscou 🇷🇺", 3),
+        "berlin": ("Berlin 🇩🇪", 1), "madrid": ("Madrid 🇪🇸", 1),
+        "rome": ("Rome 🇮🇹", 1), "amsterdam": ("Amsterdam 🇳🇱", 1),
+        "toronto": ("Toronto 🇨🇦", -5), "sydney": ("Sydney 🇦🇺", 11),
+        "beijing": ("Pékin 🇨🇳", 8), "pekin": ("Pékin 🇨🇳", 8),
+        "shanghai": ("Shanghai 🇨🇳", 8), "singapour": ("Singapour 🇸🇬", 8),
+        "istanbul": ("Istanbul 🇹🇷", 3), "cairo": ("Le Caire 🇪🇬", 2),
+        "alger": ("Alger 🇩🇿", 1), "tunis": ("Tunis 🇹🇳", 1),
+        "casablanca": ("Casablanca 🇲🇦", 0), "dakar": ("Dakar 🇸🇳", 0),
+        "miami": ("Miami 🇺🇸", -5), "chicago": ("Chicago 🇺🇸", -6),
+        "montreal": ("Montréal 🇨🇦", -5), "mexico": ("Mexico 🇲🇽", -6),
+        "seoul": ("Séoul 🇰🇷", 9), "bangkok": ("Bangkok 🇹🇭", 7),
+        "karachi": ("Karachi 🇵🇰", 5), "lagos": ("Lagos 🇳🇬", 1),
+        "nairobi": ("Nairobi 🇰🇪", 3), "johannesburg": ("Johannesburg 🇿🇦", 2),
+    }
+    
+    match = TIMEZONES.get(city)
+    if not match:
+        await update.message.reply_text("❌ Ville non trouvée. Essayez : Tokyo, Paris, Dubai, New York...")
+        return
+    
+    name, offset = match
+    utc_now = datetime.now(timezone.utc)
+    local = utc_now + timedelta(hours=offset)
+    
+    await update.message.reply_text(
+        f"🕐 *Heure — {name}*\n\n"
+        f"⏰ *{local.strftime('%H:%M:%S')}*\n"
+        f"🗓️ {local.strftime('%d/%m/%Y')}\n"
+        f"🌍 UTC{'+' if offset >= 0 else ''}{offset}",
+        parse_mode="Markdown"
+    )
+
+
+MUSIQUES = {
+    "lofi": [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+    ],
+    "relaxante": [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+    ],
+    "nature": [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3",
+    ],
+    "energique": [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
+    ],
+    "jazz": [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
+    ],
+}
+
+async def musique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    if not ctx.args:
+        keyboard = [
+            [InlineKeyboardButton("🎵 Lofi", callback_data="music_lofi"),
+             InlineKeyboardButton("😌 Relaxante", callback_data="music_relaxante")],
+            [InlineKeyboardButton("🌿 Nature", callback_data="music_nature"),
+             InlineKeyboardButton("⚡ Énergique", callback_data="music_energique")],
+            [InlineKeyboardButton("🎷 Jazz", callback_data="music_jazz")]
+        ]
+        await update.message.reply_text(
+            "🎵 *Choisissez un style de musique :*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return
+
+    style = ctx.args[0].lower()
+    if style not in MUSIQUES:
+        await update.message.reply_text("❌ Style non trouvé. Essayez : lofi, relaxante, nature, energique, jazz")
+        return
+
+    url = random.choice(MUSIQUES[style])
+    await ctx.bot.send_chat_action(chat_id=chat_id, action="upload_audio")
+    try:
+        await ctx.bot.send_audio(
+            chat_id=chat_id,
+            audio=url,
+            title=f"🎵 {style.capitalize()}",
+            performer="Libre de droits"
+        )
+    except Exception as e:
+        await update.message.reply_text("❌ Impossible d'envoyer la musique. Réessayez.")
+        print(f"Musique error: {e}")
+
+async def music_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    style = query.data.replace("music_", "")
+    url = random.choice(MUSIQUES[style])
+    await ctx.bot.send_chat_action(chat_id=query.message.chat_id, action="upload_audio")
+    try:
+        await ctx.bot.send_audio(
+            chat_id=query.message.chat_id,
+            audio=url,
+            title=f"🎵 {style.capitalize()}",
+            performer="Libre de droits"
+        )
+    except Exception as e:
+        await query.message.reply_text("❌ Impossible d'envoyer la musique.")
+        print(f"Music callback error: {e}")
+
+async def ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    import time
+    chat_id = update.effective_chat.id
+    start = time.time()
+    msg = await update.message.reply_text("🏓 Ping...")
+    elapsed = (time.time() - start) * 1000
+    emoji = "🟢" if elapsed < 200 else "🟡" if elapsed < 500 else "🔴"
+    await msg.edit_text(
+        f"🏓 *Pong !*\n\n"
+        f"{emoji} Latence : *{elapsed:.0f} ms*\n"
+        f"{'Excellent !' if elapsed < 200 else 'Correct.' if elapsed < 500 else 'Lent...'}",
+        parse_mode="Markdown"
+    )
+
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
@@ -502,17 +839,21 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 for cmd, func in [
-    ("start", start), ("helpYU", helpYU), ("clear", clear),
+    ("start", start), ("infoYU", infoYU), ("clear", clear),
     ("crypto", crypto), ("graphique", graphique), ("top10", top10),
     ("fear", fear), ("dominance", dominance), ("compare", compare),
     ("convert", convert), ("meteo", meteo), ("wiki", wiki),
-    ("priere", priere), ("citation", citation), ("blague", blague),
+    ("priere", priere), ("news", news), ("volume", volume),
+    ("alerte", alerte), ("ajout", ajout), ("portfolio", portfolio), ("resetportfolio", reset_portfolio), ("ping", ping), ("heure", heure), ("musique", musique), ("citation", citation), ("blague", blague),
     ("de", de), ("pile", pile), ("vocal", vocal), ("mdp", mdp), ("calc", calc),
 ]:
     app.add_handler(CommandHandler(cmd, func))
 
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
+app.add_handler(CallbackQueryHandler(music_callback, pattern="^music_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+job_queue = app.job_queue
+job_queue.run_repeating(check_alerts, interval=300, first=10)
 print("🤖 Bot complet démarré !")
 app.run_polling()
