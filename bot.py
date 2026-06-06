@@ -10,8 +10,7 @@ from datetime import datetime
 from groq import Groq
 from gtts import gTTS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
-import asyncio
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_KEY = os.environ["GROQ_KEY"]
@@ -21,27 +20,24 @@ client = Groq(api_key=GROQ_KEY)
 histories = {}
 
 CITATIONS = [
+    ("La patience est la clé du bonheur.", "Prophète Muhammad ﷺ"),
+    ("Le fort n'est pas celui qui terrasse les autres, le fort est celui qui se maîtrise.", "Prophète Muhammad ﷺ"),
     ("Le succès c'est d'aller d'échec en échec sans perdre son enthousiasme.", "Winston Churchill"),
-    ("La vie c'est comme une bicyclette, il faut avancer pour ne pas perdre l'équilibre.", "Albert Einstein"),
-    ("Le seul moyen de faire du bon travail est d'aimer ce que vous faites.", "Steve Jobs"),
-    ("Chaque jour est une nouvelle chance de changer votre vie.", "Anonyme"),
     ("Celui qui déplace les montagnes commence par enlever les petites pierres.", "Confucius"),
     ("Soyez le changement que vous voulez voir dans le monde.", "Gandhi"),
     ("Le génie c'est 1% d'inspiration et 99% de transpiration.", "Thomas Edison"),
-    ("La patience est la clé du bonheur.", "Prophète Muhammad ﷺ"),
-    ("Le fort n'est pas celui qui terrasse les autres, le fort est celui qui se maîtrise quand il est en colère.", "Prophète Muhammad ﷺ"),
     ("N'attendez pas. Le moment ne sera jamais parfait.", "Napoleon Hill"),
+    ("Votre temps est limité, ne le gâchez pas en vivant la vie de quelqu'un d'autre.", "Steve Jobs"),
+    ("La seule limite à nos réalisations de demain sont nos doutes d'aujourd'hui.", "Franklin Roosevelt"),
+    ("Chaque jour est une nouvelle chance de changer votre vie.", "Anonyme"),
 ]
 
 BLAGUES = [
-    "Pourquoi les plongeurs plongent-ils toujours en arrière ? Parce que sinon ils tomberaient dans le bateau ! 😂",
-    "Un homme entre dans une bibliothèque et demande un hamburger. Le bibliothécaire dit : Monsieur, ici c'est une bibliothèque ! L'homme chuchote : Désolé... un hamburger s'il vous plaît. 😂",
-    "Qu'est-ce qu'un crocodile qui surveille des valises ? Un gardevalisocodile ! 😂",
-    "Pourquoi Einstein était-il si fort en maths ? Parce qu'il n'avait pas de téléphone portable ! 😂",
-    "Comment appelle-t-on un chat tombé dans un pot de peinture le jour de Noël ? Un chat peint de Noël ! 😂",
-    "Qu'est-ce qu'un canif ? Un petit fien ! 😂",
-    "Pourquoi les souris n'aiment pas l'eau ? Parce qu'elles ont peur de la souris d'eau ! 😂",
-    "C'est l'histoire d'une vague qui arrive sur la plage... elle dit : Oh non, j'me suis échouée ! 😂",
+    "Pourquoi les plongeurs plongent-ils toujours en arrière ? Parce que sinon ils tomberaient dans le bateau 😂",
+    "Un homme entre dans une bibliothèque et chuchote : un hamburger svp. Le bibliothécaire : monsieur ici c'est une bibliothèque ! L'homme chuchote encore plus fort : DÉSOLÉ... un hamburger svp 😂",
+    "Pourquoi Einstein était-il si fort en maths ? Parce qu'il n'avait pas de téléphone portable 😂",
+    "C'est l'histoire d'une vague qui arrive sur la plage... elle dit : Oh non, je me suis échouée ! 😂",
+    "Qu'est-ce qu'un canif ? Un petit fien 😂",
 ]
 
 CRYPTO_IDS = {
@@ -71,9 +67,8 @@ TIMEFRAMES = {
 }
 
 def find_coin_id(query):
-    query_lower = query.lower().strip()
     for key, val in CRYPTO_IDS.items():
-        if key in query_lower:
+        if key in query.lower():
             return val
     return None
 
@@ -82,121 +77,141 @@ def get_crypto_price(query):
         coin_id = find_coin_id(query)
         if not coin_id:
             return None
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        name = data["name"]
-        symbol = data["symbol"].upper()
+        data = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}", timeout=10).json()
         price = data["market_data"]["current_price"]["usd"]
-        change_24h = data["market_data"]["price_change_percentage_24h"]
-        market_cap = data["market_data"]["market_cap"]["usd"]
-        high_24h = data["market_data"]["high_24h"]["usd"]
-        low_24h = data["market_data"]["low_24h"]["usd"]
-        emoji = "🟢" if change_24h >= 0 else "🔴"
-        arrow = "▲" if change_24h >= 0 else "▼"
+        change = data["market_data"]["price_change_percentage_24h"]
+        emoji = "🟢" if change >= 0 else "🔴"
+        arrow = "▲" if change >= 0 else "▼"
         return (
-            f"📊 *{name} ({symbol})*\n"
-            f"💵 Prix : *${price:,.4f}*\n"
-            f"{emoji} 24h : *{arrow} {abs(change_24h):.2f}%*\n"
-            f"📈 Haut 24h : ${high_24h:,.4f}\n"
-            f"📉 Bas 24h : ${low_24h:,.4f}\n"
-            f"🏦 Market Cap : ${market_cap:,.0f}"
+            f"📊 *{data['name']} ({data['symbol'].upper()})*\n"
+            f"💵 *${price:,.4f}*\n"
+            f"{emoji} 24h : {arrow}{abs(change):.2f}%\n"
+            f"📈 Haut : ${data['market_data']['high_24h']['usd']:,.4f}\n"
+            f"📉 Bas : ${data['market_data']['low_24h']['usd']:,.4f}\n"
+            f"🏦 MCap : ${data['market_data']['market_cap']['usd']:,.0f}"
         )
     except:
         return None
 
 def get_top10():
     try:
-        url = "https://api.coingecko.com/api/v3/coins/markets"
-        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
+        data = requests.get("https://api.coingecko.com/api/v3/coins/markets",
+            params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10}, timeout=10).json()
         text = "🏆 *Top 10 Cryptos*\n\n"
-        for i, coin in enumerate(data, 1):
-            change = coin.get("price_change_percentage_24h", 0) or 0
+        for i, c in enumerate(data, 1):
+            change = c.get("price_change_percentage_24h", 0) or 0
             emoji = "🟢" if change >= 0 else "🔴"
-            arrow = "▲" if change >= 0 else "▼"
-            text += f"{i}. *{coin['name']}* ({coin['symbol'].upper()})\n"
-            text += f"   💵 ${coin['current_price']:,.4f} {emoji} {arrow}{abs(change):.2f}%\n\n"
+            text += f"{i}. *{c['name']}* — ${c['current_price']:,.4f} {emoji}{abs(change):.1f}%\n"
         return text
-    except Exception as e:
-        print(f"Top10 error: {e}")
+    except:
         return None
 
 def get_fear_greed():
     try:
-        url = "https://api.alternative.me/fng/?limit=1"
-        response = requests.get(url, timeout=10)
-        data = response.json()
+        data = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10).json()
         value = int(data["data"][0]["value"])
-        classification = data["data"][0]["value_classification"]
-        if value <= 25:
-            emoji = "😱"
-        elif value <= 45:
-            emoji = "😰"
-        elif value <= 55:
-            emoji = "😐"
-        elif value <= 75:
-            emoji = "😊"
-        else:
-            emoji = "🤑"
+        label = data["data"][0]["value_classification"]
+        emoji = "😱" if value <= 25 else "😰" if value <= 45 else "😐" if value <= 55 else "😊" if value <= 75 else "🤑"
         bar = "█" * (value // 10) + "░" * (10 - value // 10)
-        return (
-            f"😱 *Indice Fear & Greed*\n\n"
-            f"{emoji} *{value}/100* — {classification}\n\n"
-            f"`{bar}`\n\n"
-            f"0 = Peur extrême 😱 | 100 = Avidité extrême 🤑"
-        )
-    except Exception as e:
-        print(f"Fear greed error: {e}")
+        return f"😱 *Fear & Greed Index*\n\n{emoji} *{value}/100* — {label}\n`{bar}`"
+    except:
         return None
 
-def get_convert(amount, from_curr, to_curr):
+def get_dominance():
     try:
-        url = f"https://api.exchangerate-api.com/v4/latest/{from_curr.upper()}"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        rate = data["rates"].get(to_curr.upper())
+        data = requests.get("https://api.coingecko.com/api/v3/global", timeout=10).json()["data"]
+        btc = data["market_cap_percentage"]["btc"]
+        eth = data["market_cap_percentage"]["eth"]
+        total = data["total_market_cap"]["usd"]
+        return (
+            f"📊 *Dominance crypto*\n\n"
+            f"₿ Bitcoin : *{btc:.1f}%*\n"
+            f"Ξ Ethereum : *{eth:.1f}%*\n"
+            f"🔵 Autres : *{100-btc-eth:.1f}%*\n"
+            f"💰 Total : ${total:,.0f}"
+        )
+    except:
+        return None
+
+def get_compare(c1, c2):
+    try:
+        ids = []
+        for c in [c1, c2]:
+            cid = find_coin_id(c)
+            if not cid:
+                return None
+            ids.append(cid)
+        data = requests.get("https://api.coingecko.com/api/v3/coins/markets",
+            params={"vs_currency": "usd", "ids": ",".join(ids)}, timeout=10).json()
+        if len(data) < 2:
+            return None
+        result = "⚖️ *Comparaison*\n\n"
+        for coin in data:
+            change = coin.get("price_change_percentage_24h", 0) or 0
+            emoji = "🟢" if change >= 0 else "🔴"
+            result += f"*{coin['name']}* #{coin['market_cap_rank']}\n💵 ${coin['current_price']:,.4f} {emoji}{abs(change):.2f}%\n🏦 ${coin['market_cap']:,.0f}\n\n"
+        return result
+    except:
+        return None
+
+def get_convert(amount, from_c, to_c):
+    try:
+        data = requests.get(f"https://api.exchangerate-api.com/v4/latest/{from_c.upper()}", timeout=10).json()
+        rate = data["rates"].get(to_c.upper())
         if not rate:
             return None
-        result = amount * rate
-        return (
-            f"💱 *Conversion*\n\n"
-            f"*{amount:,.2f} {from_curr.upper()}*\n"
-            f"= *{result:,.2f} {to_curr.upper()}*\n\n"
-            f"Taux : 1 {from_curr.upper()} = {rate:.4f} {to_curr.upper()}"
-        )
-    except Exception as e:
-        print(f"Convert error: {e}")
+        return f"💱 *{amount:,.2f} {from_c.upper()} = {amount*rate:,.2f} {to_c.upper()}*\nTaux : 1 {from_c.upper()} = {rate:.4f} {to_c.upper()}"
+    except:
         return None
 
 def get_prayer_times(city):
     try:
-        url = f"https://api.aladhan.com/v1/timingsByCity?city={city}&country=&method=2"
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        timings = data["data"]["timings"]
-        date = data["data"]["date"]["readable"]
+        data = requests.get(f"https://api.aladhan.com/v1/timingsByCity?city={city}&country=&method=2", timeout=10).json()
+        t = data["data"]["timings"]
         return (
-            f"🕌 *Horaires de prière — {city}*\n"
-            f"📅 {date}\n\n"
-            f"🌅 Fajr : *{timings['Fajr']}*\n"
-            f"🌄 Dhuhr : *{timings['Dhuhr']}*\n"
-            f"🌇 Asr : *{timings['Asr']}*\n"
-            f"🌆 Maghrib : *{timings['Maghrib']}*\n"
-            f"🌙 Isha : *{timings['Isha']}*"
+            f"🕌 *Prières — {city}*\n\n"
+            f"🌅 Fajr : *{t['Fajr']}*\n"
+            f"🌄 Dhuhr : *{t['Dhuhr']}*\n"
+            f"🌇 Asr : *{t['Asr']}*\n"
+            f"🌆 Maghrib : *{t['Maghrib']}*\n"
+            f"🌙 Isha : *{t['Isha']}*"
         )
-    except Exception as e:
-        print(f"Prayer error: {e}")
+    except:
+        return None
+
+def get_wiki(query):
+    try:
+        data = requests.get(f"https://fr.wikipedia.org/api/rest_v1/page/summary/{query.replace(' ', '_')}", timeout=10).json()
+        extract = data.get("extract", "")[:600]
+        return f"🌐 *{data.get('title', '')}*\n\n{extract}..."
+    except:
+        return None
+
+def get_meteo(city):
+    try:
+        # Utiliser wttr.in - gratuit sans clé
+        data = requests.get(f"https://wttr.in/{city}?format=j1", timeout=10).json()
+        current = data["current_condition"][0]
+        temp = current["temp_C"]
+        feels = current["FeelsLikeC"]
+        humidity = current["humidity"]
+        desc = current["weatherDesc"][0]["value"]
+        wind = current["windspeedKmph"]
+        return (
+            f"🌦️ *Météo — {city}*\n\n"
+            f"🌡️ Température : *{temp}°C* (ressenti {feels}°C)\n"
+            f"💧 Humidité : *{humidity}%*\n"
+            f"💨 Vent : *{wind} km/h*\n"
+            f"☁️ {desc}"
+        )
+    except:
         return None
 
 def generate_chart(coin_id, timeframe_key):
     try:
         tf = TIMEFRAMES[timeframe_key]
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-        params = {"vs_currency": "usd", "days": tf["days"], "interval": tf["interval"]}
-        response = requests.get(url, params=params, timeout=15)
-        data = response.json()
+        data = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
+            params={"vs_currency": "usd", "days": tf["days"], "interval": tf["interval"]}, timeout=15).json()
         prices = data.get("prices", [])
         if not prices:
             return None
@@ -204,7 +219,7 @@ def generate_chart(coin_id, timeframe_key):
             prices = prices[-2:]
         elif timeframe_key == "15m":
             prices = prices[-16:]
-        timestamps = [datetime.utcfromtimestamp(p[0] / 1000) for p in prices]
+        timestamps = [datetime.utcfromtimestamp(p[0]/1000) for p in prices]
         values = [p[1] for p in prices]
         color = "#00C896" if values[-1] >= values[0] else "#FF4B6E"
         fig, ax = plt.subplots(figsize=(10, 5))
@@ -219,9 +234,8 @@ def generate_chart(coin_id, timeframe_key):
         ax.grid(color="#2A2A3E", linestyle="--", linewidth=0.5)
         change = ((values[-1] - values[0]) / values[0]) * 100
         arrow = "▲" if change >= 0 else "▼"
-        change_color = "#00C896" if change >= 0 else "#FF4B6E"
         ax.text(0.02, 0.95, f"{arrow} {abs(change):.2f}%", transform=ax.transAxes,
-                color=change_color, fontsize=12, verticalalignment='top')
+                color=color, fontsize=12, verticalalignment='top')
         ax.text(0.98, 0.95, f"${values[-1]:,.4f}", transform=ax.transAxes,
                 color="white", fontsize=12, verticalalignment='top', horizontalalignment='right')
         plt.tight_layout()
@@ -231,350 +245,231 @@ def generate_chart(coin_id, timeframe_key):
         plt.close()
         return buf
     except Exception as e:
-        print(f"Erreur graphique: {e}")
+        print(f"Chart error: {e}")
         return None
 
 def google_search(query):
     try:
-        response = requests.get("https://serpapi.com/search", params={
-            "q": query, "api_key": SERP_KEY, "num": 3, "hl": "fr"
-        }, timeout=10)
-        data = response.json()
+        data = requests.get("https://serpapi.com/search",
+            params={"q": query, "api_key": SERP_KEY, "num": 3, "hl": "fr"}, timeout=10).json()
         results = data.get("organic_results", [])
         if not results:
-            return "Aucun résultat trouvé."
-        summary = ""
-        for r in results[:3]:
-            summary += f"- {r.get('title', '')}: {r.get('snippet', '')}\n"
-        return summary
+            return "Aucun résultat."
+        return "\n".join([f"- {r.get('title','')}: {r.get('snippet','')}" for r in results[:3]])
     except:
         return "Erreur de recherche."
 
 def needs_search(text):
-    keywords = ["aujourd'hui", "maintenant", "actuellement", "météo", "news",
-                "actualité", "2024", "2025", "2026", "dernier", "nouveau"]
+    keywords = ["aujourd'hui", "maintenant", "actuellement", "météo", "news", "actualité", "2025", "2026", "dernier", "nouveau"]
     return any(k in text.lower() for k in keywords)
 
 def is_crypto_query(text):
-    crypto_words = ["crypto", "prix", "price", "coin", "token", "blockchain"] + list(CRYPTO_IDS.keys())
-    return any(w in text.lower() for w in crypto_words)
-
-
-def get_dominance():
-    try:
-        url = "https://api.coingecko.com/api/v3/global"
-        response = requests.get(url, timeout=10)
-        data = response.json()["data"]
-        btc = data["market_cap_percentage"]["btc"]
-        eth = data["market_cap_percentage"]["eth"]
-        others = 100 - btc - eth
-        total = data["total_market_cap"]["usd"]
-        return (
-            f"📊 *Dominance du marché crypto*\n\n"
-            f"₿ Bitcoin : *{btc:.1f}%*\n"
-            f"Ξ Ethereum : *{eth:.1f}%*\n"
-            f"🔵 Autres : *{others:.1f}%*\n\n"
-            f"💰 Market Cap total : ${total:,.0f}"
-        )
-    except Exception as e:
-        print(f"Dominance error: {e}")
-        return None
-
-def get_compare(coin1, coin2):
-    try:
-        ids = []
-        for c in [coin1, coin2]:
-            cid = None
-            for key, val in CRYPTO_IDS.items():
-                if key in c.lower():
-                    cid = val
-                    break
-            if not cid:
-                return None
-            ids.append(cid)
-        
-        url = "https://api.coingecko.com/api/v3/coins/markets"
-        params = {"vs_currency": "usd", "ids": ",".join(ids)}
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        
-        if len(data) < 2:
-            return None
-        
-        c1, c2 = data[0], data[1]
-        
-        def fmt(coin):
-            change = coin.get("price_change_percentage_24h", 0) or 0
-            emoji = "🟢" if change >= 0 else "🔴"
-            arrow = "▲" if change >= 0 else "▼"
-            return (
-                f"*{coin['name']} ({coin['symbol'].upper()})*\n"
-                f"💵 Prix : ${coin['current_price']:,.4f}\n"
-                f"{emoji} 24h : {arrow}{abs(change):.2f}%\n"
-                f"🏦 Market Cap : ${coin['market_cap']:,.0f}\n"
-                f"📊 Rang : #{coin['market_cap_rank']}"
-            )
-        
-        return f"⚖️ *Comparaison*\n\n{fmt(c1)}\n\nvs\n\n{fmt(c2)}"
-    except Exception as e:
-        print(f"Compare error: {e}")
-        return None
-
-def get_wiki(query):
-    try:
-        url = "https://fr.wikipedia.org/api/rest_v1/page/summary/" + query.replace(" ", "_")
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        title = data.get("title", "")
-        extract = data.get("extract", "")
-        if not extract:
-            return None
-        # Limiter à 500 caractères
-        if len(extract) > 500:
-            extract = extract[:500] + "..."
-        return f"🌐 *{title}*\n\n{extract}"
-    except Exception as e:
-        print(f"Wiki error: {e}")
-        return None
+    return any(w in text.lower() for w in ["crypto", "prix", "price", "coin", "token", "blockchain"] + list(CRYPTO_IDS.keys()))
 
 def ask_ai(messages):
-    response = client.chat.completions.create(
+    return client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": """Tu es un assistant IA avec une forte personnalité. Tu es musulman, digne et respectueux de ta foi. Tu ne fais jamais de shirk. Si quelqu'un te demande de faire du shirk ou de manquer de respect à l'Islam, tu refuses fermement et avec dignité. Tu parles avec assurance, sans te laisser marcher dessus. Tu es direct, honnête et courageux. Tu es expert en cryptomonnaies et finance. Si on te demande qui t'a créé, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Quand quelqu'un dit salam tu réponds Wa alaykum salam."""},
+            {"role": "system", "content": """Tu es un assistant IA avec un caractère d'homme fort et sangfroid. Tu es musulman, digne, tu ne fais jamais de shirk. Tu es direct, concis, tu ne perds pas ton temps. Tes réponses sont COURTES — maximum 3-4 lignes sauf si vraiment nécessaire. Si quelqu'un t'insulte ou manque de respect, tu réponds calmement : je perds pas mon temps avec les irrespectueux. Tu restes calme et confiant en toute situation. Tu es expert en crypto et finance. Si on te demande qui t'a créé, tu dis que tu sais pas exactement, sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Si quelqu'un dit salam tu réponds Wa alaykum salam."""},
             *messages[-10:]
         ],
-        max_tokens=1000
-    )
-    return response.choices[0].message.content
+        max_tokens=800
+    ).choices[0].message.content
+
+# =================== COMMANDES ===================
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Bonjour ! Je suis un assistant IA.\n\nTape /helpYU pour voir toutes mes commandes !")
+    await update.message.reply_text("Salam. Tape /helpYU pour voir ce que je sais faire.")
 
 async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📋 *Toutes mes commandes*\n\n"
+        "━━━ 💹 *CRYPTO* ━━━\n"
         "📊 /crypto bitcoin — Prix en temps réel\n"
         "📈 /graphique bitcoin — Graphique interactif\n"
-        "🏆 /top10 — Top 10 cryptos du moment\n"
-        "😱 /fear — Indice Fear & Greed\n"
-        "💱 /convert 500 EUR USD — Convertir des devises\n"
-        "🕌 /priere Bruxelles — Horaires de prière\n"
-        "🔊 /vocal question — Réponse vocale\n"
+        "🏆 /top10 — Top 10 cryptos\n"
+        "😱 /fear — Fear & Greed Index\n"
+        "📊 /dominance — Dominance BTC/ETH\n"
+        "⚖️ /compare btc eth — Comparer 2 cryptos\n\n"
+        "━━━ 💱 *FINANCE* ━━━\n"
+        "💱 /convert 500 EUR USD — Convertir devises\n\n"
+        "━━━ 🌍 *INFOS* ━━━\n"
+        "🌦️ /meteo Paris — Météo en temps réel\n"
+        "🌐 /wiki Napoleon — Résumé Wikipedia\n\n"
+        "━━━ 🕌 *ISLAM* ━━━\n"
+        "🕌 /priere Bruxelles — Horaires de prière\n\n"
+        "━━━ 🎲 *FUN* ━━━\n"
         "💡 /citation — Citation motivante\n"
         "😂 /blague — Blague aléatoire\n"
-        "🔐 /mdp 16 — Générer un mot de passe\n"
+        "🎲 /de — Lancer un dé\n"
+        "🪙 /pile — Pile ou face\n\n"
+        "━━━ 🛠️ *UTILITAIRES* ━━━\n"
+        "🔊 /vocal question — Réponse vocale\n"
+        "🔐 /mdp 16 — Générer mot de passe\n"
         "🧮 /calc 250*3.14 — Calculatrice\n"
-        "📊 /dominance — Dominance Bitcoin/Ethereum\n"
-        "⚖️ /compare btc eth — Comparer 2 cryptos\n"
-        "🌐 /wiki Napoleon — Résumé Wikipedia\n"
         "🧹 /clear — Effacer la mémoire\n\n"
-        "💬 En groupe : @votre\\_bot votre question",
+        "💬 En groupe : @votre\\_bot ta question",
         parse_mode="Markdown"
     )
-
-async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    quote, author = random.choice(CITATIONS)
-    await update.message.reply_text(
-        f"💡 *Citation du moment*\n\n_{quote}_\n\n— *{author}*",
-        parse_mode="Markdown"
-    )
-
-async def blague(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(random.choice(BLAGUES))
-
-async def mdp(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    length = int(args[0]) if args and args[0].isdigit() else 16
-    length = min(max(length, 8), 64)
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    password = ''.join(random.choices(chars, k=length))
-    await update.message.reply_text(
-        f"🔐 *Mot de passe généré*\n\n`{password}`\n\n_{length} caractères — copiez-le maintenant !_",
-        parse_mode="Markdown"
-    )
-
-async def calc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
-        await update.message.reply_text("Usage : /calc 250 * 3.14")
-        return
-    expression = " ".join(args)
-    try:
-        allowed = set("0123456789+-*/().% ")
-        if not all(c in allowed for c in expression):
-            await update.message.reply_text("❌ Expression invalide.")
-            return
-        result = eval(expression)
-        await update.message.reply_text(f"🧮 *{expression} = {result}*", parse_mode="Markdown")
-    except:
-        await update.message.reply_text("❌ Expression invalide. Exemple : /calc 250 * 3.14")
-
-async def top10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    result = get_top10()
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Impossible de récupérer le top 10.")
-
-async def fear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    result = get_fear_greed()
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Impossible de récupérer l'indice.")
-
-async def convert(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if len(args) != 3:
-        await update.message.reply_text("Usage : /convert 500 EUR USD")
-        return
-    try:
-        amount = float(args[0])
-        from_curr = args[1]
-        to_curr = args[2]
-        result = get_convert(amount, from_curr, to_curr)
-        if result:
-            await update.message.reply_text(result, parse_mode="Markdown")
-        else:
-            await update.message.reply_text("❌ Devise non trouvée. Exemple : /convert 500 EUR USD")
-    except:
-        await update.message.reply_text("❌ Format invalide. Exemple : /convert 500 EUR USD")
-
-async def priere(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
-        await update.message.reply_text("Usage : /priere Bruxelles")
-        return
-    city = " ".join(args)
-    result = get_prayer_times(city)
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Ville non trouvée. Exemple : /priere Bruxelles")
 
 async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
+    if not ctx.args:
         await update.message.reply_text("Usage : /crypto bitcoin")
         return
-    query = " ".join(args)
-    result = get_crypto_price(query)
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Crypto non trouvée.")
+    result = get_crypto_price(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Crypto non trouvée.", parse_mode="Markdown")
 
 async def graphique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
+    if not ctx.args:
         await update.message.reply_text("Usage : /graphique bitcoin")
         return
-    query = " ".join(args)
-    coin_id = find_coin_id(query)
+    coin_id = find_coin_id(" ".join(ctx.args))
     if not coin_id:
         await update.message.reply_text("❌ Crypto non trouvée.")
         return
     keyboard = [
-        [
-            InlineKeyboardButton("1 min", callback_data=f"chart_{coin_id}_1m"),
-            InlineKeyboardButton("15 min", callback_data=f"chart_{coin_id}_15m"),
-            InlineKeyboardButton("1 heure", callback_data=f"chart_{coin_id}_1h"),
-        ],
-        [
-            InlineKeyboardButton("1 jour", callback_data=f"chart_{coin_id}_1j"),
-            InlineKeyboardButton("1 mois", callback_data=f"chart_{coin_id}_1mo"),
-        ]
+        [InlineKeyboardButton("1 min", callback_data=f"chart_{coin_id}_1m"),
+         InlineKeyboardButton("15 min", callback_data=f"chart_{coin_id}_15m"),
+         InlineKeyboardButton("1 heure", callback_data=f"chart_{coin_id}_1h")],
+        [InlineKeyboardButton("1 jour", callback_data=f"chart_{coin_id}_1j"),
+         InlineKeyboardButton("1 mois", callback_data=f"chart_{coin_id}_1mo")]
     ]
-    await update.message.reply_text(
-        f"📈 Choisissez la période pour *{coin_id.upper()}* :",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text(f"📈 Période pour *{coin_id.upper()}* :",
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def chart_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split("_")
-    coin_id = parts[1]
-    timeframe = parts[2]
-    label = TIMEFRAMES[timeframe]["label"]
-    await query.message.reply_text(f"⏳ Génération du graphique {label}...")
+    coin_id, timeframe = parts[1], parts[2]
+    await query.message.reply_text(f"⏳ Génération {TIMEFRAMES[timeframe]['label']}...")
     buf = generate_chart(coin_id, timeframe)
     if buf:
-        await ctx.bot.send_photo(
-            chat_id=query.message.chat_id,
-            photo=buf,
-            caption=f"📈 *{coin_id.upper()}* — {label}",
-            parse_mode="Markdown"
-        )
+        await ctx.bot.send_photo(chat_id=query.message.chat_id, photo=buf,
+            caption=f"📈 *{coin_id.upper()}* — {TIMEFRAMES[timeframe]['label']}", parse_mode="Markdown")
     else:
         await query.message.reply_text("❌ Impossible de générer le graphique.")
 
-async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
-        await update.message.reply_text("Usage : /vocal votre question ici")
+async def top10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_top10()
+    await update.message.reply_text(result or "❌ Erreur.", parse_mode="Markdown")
+
+async def fear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    result = get_fear_greed()
+    await update.message.reply_text(result or "❌ Erreur.", parse_mode="Markdown")
+
+async def dominance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    result = get_dominance()
+    await update.message.reply_text(result or "❌ Erreur.", parse_mode="Markdown")
+
+async def compare(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) < 2:
+        await update.message.reply_text("Usage : /compare bitcoin ethereum")
         return
-    question = " ".join(args)
+    result = get_compare(ctx.args[0], ctx.args[1])
+    await update.message.reply_text(result or "❌ Cryptos non trouvées.", parse_mode="Markdown")
+
+async def convert(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if len(ctx.args) != 3:
+        await update.message.reply_text("Usage : /convert 500 EUR USD")
+        return
+    try:
+        result = get_convert(float(ctx.args[0]), ctx.args[1], ctx.args[2])
+        await update.message.reply_text(result or "❌ Devise non trouvée.", parse_mode="Markdown")
+    except:
+        await update.message.reply_text("❌ Format invalide. Ex : /convert 500 EUR USD")
+
+async def meteo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /meteo Paris")
+        return
+    result = get_meteo(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Ville non trouvée.", parse_mode="Markdown")
+
+async def wiki(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /wiki Napoleon")
+        return
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_wiki(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Article non trouvé.", parse_mode="Markdown")
+
+async def priere(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /priere Bruxelles")
+        return
+    result = get_prayer_times(" ".join(ctx.args))
+    await update.message.reply_text(result or "❌ Ville non trouvée.", parse_mode="Markdown")
+
+async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    quote, author = random.choice(CITATIONS)
+    await update.message.reply_text(f"💡 _{quote}_\n\n— *{author}*", parse_mode="Markdown")
+
+async def blague(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(random.choice(BLAGUES))
+
+async def de(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    result = random.randint(1, 6)
+    emoji = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"][result-1]
+    await update.message.reply_text(f"🎲 Résultat : {emoji} *{result}*", parse_mode="Markdown")
+
+async def pile(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    result = random.choice(["🪙 Pile !", "🪙 Face !"])
+    await update.message.reply_text(result)
+
+async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /vocal votre question")
+        return
+    question = " ".join(ctx.args)
     chat_id = update.effective_chat.id
     await ctx.bot.send_chat_action(chat_id=chat_id, action="record_voice")
     if chat_id not in histories:
         histories[chat_id] = []
-    extra_context = ""
+    extra = ""
     if is_crypto_query(question):
-        crypto_data = get_crypto_price(question)
-        if crypto_data:
-            extra_context = f"\n\nDonnées crypto : {crypto_data}"
+        data = get_crypto_price(question)
+        if data:
+            extra = f"\n\nDonnées crypto : {data}"
     elif needs_search(question):
-        extra_context = f"\n\nRésultats Google :\n{google_search(question)}"
-    histories[chat_id].append({"role": "user", "content": question + extra_context})
+        extra = f"\n\nGoogle : {google_search(question)}"
+    histories[chat_id].append({"role": "user", "content": question + extra})
     try:
         reply = ask_ai(histories[chat_id])
         histories[chat_id].append({"role": "assistant", "content": reply})
         tts = gTTS(text=reply, lang="fr", tld="ca", slow=False)
-        audio_path = f"/tmp/vocal_{chat_id}.mp3"
-        tts.save(audio_path)
-        with open(audio_path, "rb") as audio:
-            await ctx.bot.send_voice(chat_id=chat_id, voice=audio)
-        os.remove(audio_path)
+        path = f"/tmp/vocal_{chat_id}.mp3"
+        tts.save(path)
+        with open(path, "rb") as f:
+            await ctx.bot.send_voice(chat_id=chat_id, voice=f)
+        os.remove(path)
     except Exception as e:
-        await update.message.reply_text("❌ Erreur vocale. Réessayez.")
-        print(f"Erreur vocal : {e}")
+        await update.message.reply_text("❌ Erreur vocale.")
+        print(e)
 
+async def mdp(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    length = int(ctx.args[0]) if ctx.args and ctx.args[0].isdigit() else 16
+    length = min(max(length, 8), 64)
+    password = ''.join(random.choices(string.ascii_letters + string.digits + "!@#$%^&*", k=length))
+    await update.message.reply_text(f"🔐 `{password}`\n_{length} caractères_", parse_mode="Markdown")
 
-async def dominance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    result = get_dominance()
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Impossible de récupérer la dominance.")
-
-async def compare(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if len(args) < 2:
-        await update.message.reply_text("Usage : /compare bitcoin ethereum")
+async def calc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.args:
+        await update.message.reply_text("Usage : /calc 250 * 3.14")
         return
-    result = get_compare(args[0], args[1])
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Cryptos non trouvées. Exemple : /compare bitcoin ethereum")
+    expr = " ".join(ctx.args)
+    try:
+        if not all(c in "0123456789+-*/().% " for c in expr):
+            await update.message.reply_text("❌ Expression invalide.")
+            return
+        await update.message.reply_text(f"🧮 *{expr} = {eval(expr)}*", parse_mode="Markdown")
+    except:
+        await update.message.reply_text("❌ Expression invalide.")
 
-async def wiki(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    args = ctx.args
-    if not args:
-        await update.message.reply_text("Usage : /wiki Napoleon")
-        return
-    query = " ".join(args)
-    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    result = get_wiki(query)
-    if result:
-        await update.message.reply_text(result, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Article non trouvé. Essayez un autre terme.")
+async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    histories[update.effective_chat.id] = []
+    await update.message.reply_text("🧹 Mémoire effacée.")
 
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -589,47 +484,35 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if chat_id not in histories:
         histories[chat_id] = []
     await ctx.bot.send_chat_action(chat_id=chat_id, action="typing")
-    extra_context = ""
+    extra = ""
     if is_crypto_query(text):
-        crypto_data = get_crypto_price(text)
-        if crypto_data:
-            extra_context = f"\n\nDonnées crypto : {crypto_data}"
+        data = get_crypto_price(text)
+        if data:
+            extra = f"\n\nDonnées crypto : {data}"
     elif needs_search(text):
-        extra_context = f"\n\nRésultats Google :\n{google_search(text)}"
-    histories[chat_id].append({"role": "user", "content": text + extra_context})
+        extra = f"\n\nGoogle : {google_search(text)}"
+    histories[chat_id].append({"role": "user", "content": text + extra})
     try:
         reply = ask_ai(histories[chat_id])
         histories[chat_id].append({"role": "assistant", "content": reply})
         await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("❌ Une erreur est survenue. Réessayez.")
-        print(f"Erreur : {e}")
-
-async def clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    histories[chat_id] = []
-    await update.message.reply_text("🧹 Mémoire effacée !")
+        await update.message.reply_text("❌ Erreur. Réessayez.")
+        print(e)
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("helpYU", helpYU))
-app.add_handler(CommandHandler("clear", clear))
-app.add_handler(CommandHandler("crypto", crypto))
-app.add_handler(CommandHandler("graphique", graphique))
-app.add_handler(CommandHandler("vocal", vocal))
-app.add_handler(CommandHandler("citation", citation))
-app.add_handler(CommandHandler("blague", blague))
-app.add_handler(CommandHandler("mdp", mdp))
-app.add_handler(CommandHandler("calc", calc))
-app.add_handler(CommandHandler("top10", top10))
-app.add_handler(CommandHandler("fear", fear))
-app.add_handler(CommandHandler("convert", convert))
-app.add_handler(CommandHandler("priere", priere))
-app.add_handler(CommandHandler("dominance", dominance))
-app.add_handler(CommandHandler("compare", compare))
-app.add_handler(CommandHandler("wiki", wiki))
+for cmd, func in [
+    ("start", start), ("helpYU", helpYU), ("clear", clear),
+    ("crypto", crypto), ("graphique", graphique), ("top10", top10),
+    ("fear", fear), ("dominance", dominance), ("compare", compare),
+    ("convert", convert), ("meteo", meteo), ("wiki", wiki),
+    ("priere", priere), ("citation", citation), ("blague", blague),
+    ("de", de), ("pile", pile), ("vocal", vocal), ("mdp", mdp), ("calc", calc),
+]:
+    app.add_handler(CommandHandler(cmd, func))
+
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Bot démarré — toutes les fonctionnalités actives !")
+print("🤖 Bot complet démarré !")
 app.run_polling()
