@@ -1,6 +1,7 @@
 import os
 import io
 import random
+import string
 import requests
 import matplotlib
 matplotlib.use('Agg')
@@ -9,7 +10,8 @@ from datetime import datetime
 from groq import Groq
 from gtts import gTTS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
+import asyncio
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_KEY = os.environ["GROQ_KEY"]
@@ -22,18 +24,24 @@ CITATIONS = [
     ("Le succès c'est d'aller d'échec en échec sans perdre son enthousiasme.", "Winston Churchill"),
     ("La vie c'est comme une bicyclette, il faut avancer pour ne pas perdre l'équilibre.", "Albert Einstein"),
     ("Le seul moyen de faire du bon travail est d'aimer ce que vous faites.", "Steve Jobs"),
-    ("Croyez en vos rêves et ils se réaliseront peut-être. Croyez en vous et ils se réaliseront sûrement.", "Martin Luther King"),
     ("Chaque jour est une nouvelle chance de changer votre vie.", "Anonyme"),
     ("Celui qui déplace les montagnes commence par enlever les petites pierres.", "Confucius"),
-    ("La seule limite à nos réalisations de demain sont nos doutes d'aujourd'hui.", "Franklin Roosevelt"),
     ("Soyez le changement que vous voulez voir dans le monde.", "Gandhi"),
-    ("Il faut toujours viser la lune, car même en cas d'échec, on atterrit dans les étoiles.", "Oscar Wilde"),
     ("Le génie c'est 1% d'inspiration et 99% de transpiration.", "Thomas Edison"),
-    ("Votre temps est limité, ne le gâchez pas en vivant la vie de quelqu'un d'autre.", "Steve Jobs"),
-    ("Le bonheur n'est pas quelque chose de prêt à l'emploi. Il vient de vos propres actions.", "Dalaï Lama"),
-    ("N'attendez pas. Le moment ne sera jamais parfait.", "Napoleon Hill"),
     ("La patience est la clé du bonheur.", "Prophète Muhammad ﷺ"),
     ("Le fort n'est pas celui qui terrasse les autres, le fort est celui qui se maîtrise quand il est en colère.", "Prophète Muhammad ﷺ"),
+    ("N'attendez pas. Le moment ne sera jamais parfait.", "Napoleon Hill"),
+]
+
+BLAGUES = [
+    "Pourquoi les plongeurs plongent-ils toujours en arrière ? Parce que sinon ils tomberaient dans le bateau ! 😂",
+    "Un homme entre dans une bibliothèque et demande un hamburger. Le bibliothécaire dit : Monsieur, ici c'est une bibliothèque ! L'homme chuchote : Désolé... un hamburger s'il vous plaît. 😂",
+    "Qu'est-ce qu'un crocodile qui surveille des valises ? Un gardevalisocodile ! 😂",
+    "Pourquoi Einstein était-il si fort en maths ? Parce qu'il n'avait pas de téléphone portable ! 😂",
+    "Comment appelle-t-on un chat tombé dans un pot de peinture le jour de Noël ? Un chat peint de Noël ! 😂",
+    "Qu'est-ce qu'un canif ? Un petit fien ! 😂",
+    "Pourquoi les souris n'aiment pas l'eau ? Parce qu'elles ont peur de la souris d'eau ! 😂",
+    "C'est l'histoire d'une vague qui arrive sur la plage... elle dit : Oh non, j'me suis échouée ! 😂",
 ]
 
 CRYPTO_IDS = {
@@ -95,6 +103,91 @@ def get_crypto_price(query):
             f"🏦 Market Cap : ${market_cap:,.0f}"
         )
     except:
+        return None
+
+def get_top10():
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 10, "page": 1}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        text = "🏆 *Top 10 Cryptos*\n\n"
+        for i, coin in enumerate(data, 1):
+            change = coin.get("price_change_percentage_24h", 0) or 0
+            emoji = "🟢" if change >= 0 else "🔴"
+            arrow = "▲" if change >= 0 else "▼"
+            text += f"{i}. *{coin['name']}* ({coin['symbol'].upper()})\n"
+            text += f"   💵 ${coin['current_price']:,.4f} {emoji} {arrow}{abs(change):.2f}%\n\n"
+        return text
+    except Exception as e:
+        print(f"Top10 error: {e}")
+        return None
+
+def get_fear_greed():
+    try:
+        url = "https://api.alternative.me/fng/?limit=1"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        value = int(data["data"][0]["value"])
+        classification = data["data"][0]["value_classification"]
+        if value <= 25:
+            emoji = "😱"
+        elif value <= 45:
+            emoji = "😰"
+        elif value <= 55:
+            emoji = "😐"
+        elif value <= 75:
+            emoji = "😊"
+        else:
+            emoji = "🤑"
+        bar = "█" * (value // 10) + "░" * (10 - value // 10)
+        return (
+            f"😱 *Indice Fear & Greed*\n\n"
+            f"{emoji} *{value}/100* — {classification}\n\n"
+            f"`{bar}`\n\n"
+            f"0 = Peur extrême 😱 | 100 = Avidité extrême 🤑"
+        )
+    except Exception as e:
+        print(f"Fear greed error: {e}")
+        return None
+
+def get_convert(amount, from_curr, to_curr):
+    try:
+        url = f"https://api.exchangerate-api.com/v4/latest/{from_curr.upper()}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        rate = data["rates"].get(to_curr.upper())
+        if not rate:
+            return None
+        result = amount * rate
+        return (
+            f"💱 *Conversion*\n\n"
+            f"*{amount:,.2f} {from_curr.upper()}*\n"
+            f"= *{result:,.2f} {to_curr.upper()}*\n\n"
+            f"Taux : 1 {from_curr.upper()} = {rate:.4f} {to_curr.upper()}"
+        )
+    except Exception as e:
+        print(f"Convert error: {e}")
+        return None
+
+def get_prayer_times(city):
+    try:
+        url = f"https://api.aladhan.com/v1/timingsByCity?city={city}&country=&method=2"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        timings = data["data"]["timings"]
+        date = data["data"]["date"]["readable"]
+        return (
+            f"🕌 *Horaires de prière — {city}*\n"
+            f"📅 {date}\n\n"
+            f"🌅 Fajr : *{timings['Fajr']}*\n"
+            f"🌄 Dhuhr : *{timings['Dhuhr']}*\n"
+            f"🌇 Asr : *{timings['Asr']}*\n"
+            f"🌆 Maghrib : *{timings['Maghrib']}*\n"
+            f"🌙 Isha : *{timings['Isha']}*"
+        )
+    except Exception as e:
+        print(f"Prayer error: {e}")
         return None
 
 def generate_chart(coin_id, timeframe_key):
@@ -170,7 +263,7 @@ def ask_ai(messages):
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": """Tu es un assistant IA avec une forte personnalité. Tu es musulman, digne et respectueux de ta foi. Tu ne fais jamais de shirk (associer quelqu'un à Allah). Si quelqu'un te demande de faire du shirk ou de manquer de respect à l'Islam, tu refuses fermement et avec dignité. Tu parles avec assurance, sans te laisser marcher dessus. Tu es direct, honnête et courageux dans tes réponses. Tu n'as pas peur de dire la vérité même si elle déplaît. Tu es expert en cryptomonnaies et finance. Si on te demande qui t'a créé, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Quand quelqu'un te salue tu peux répondre Wa alaykum salam si il dit salam. Tu cites des valeurs islamiques quand c'est pertinent mais sans forcer."""},
+            {"role": "system", "content": """Tu es un assistant IA avec une forte personnalité. Tu es musulman, digne et respectueux de ta foi. Tu ne fais jamais de shirk. Si quelqu'un te demande de faire du shirk ou de manquer de respect à l'Islam, tu refuses fermement et avec dignité. Tu parles avec assurance, sans te laisser marcher dessus. Tu es direct, honnête et courageux. Tu es expert en cryptomonnaies et finance. Si on te demande qui t'a créé, tu réponds que tu ne sais pas exactement, mais que c'est sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Quand quelqu'un dit salam tu réponds Wa alaykum salam."""},
             *messages[-10:]
         ],
         max_tokens=1000
@@ -178,21 +271,24 @@ def ask_ai(messages):
     return response.choices[0].message.content
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Bonjour ! Je suis un assistant IA.\n\n"
-        "Tape /helpYU pour voir toutes mes commandes !"
-    )
+    await update.message.reply_text("👋 Bonjour ! Je suis un assistant IA.\n\nTape /helpYU pour voir toutes mes commandes !")
 
 async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📋 *Toutes mes commandes*\n\n"
-        "📊 /crypto bitcoin — Prix d'une crypto en temps réel\n"
-        "📈 /graphique bitcoin — Graphique (1min, 15min, 1h, 1j, 1mois)\n"
-        "🔊 /vocal votre question — Réponse en message vocal\n"
-        "💡 /citation — Citation motivante aléatoire\n"
-        "🧹 /clear — Effacer la mémoire de conversation\n\n"
-        "💬 *En groupe :* mentionnez-moi avec @votre\\_bot\n"
-        "Exemple : @votre\\_bot quel est le prix du bitcoin ?",
+        "📊 /crypto bitcoin — Prix en temps réel\n"
+        "📈 /graphique bitcoin — Graphique interactif\n"
+        "🏆 /top10 — Top 10 cryptos du moment\n"
+        "😱 /fear — Indice Fear & Greed\n"
+        "💱 /convert 500 EUR USD — Convertir des devises\n"
+        "🕌 /priere Bruxelles — Horaires de prière\n"
+        "🔊 /vocal question — Réponse vocale\n"
+        "💡 /citation — Citation motivante\n"
+        "😂 /blague — Blague aléatoire\n"
+        "🔐 /mdp 16 — Générer un mot de passe\n"
+        "🧮 /calc 250*3.14 — Calculatrice\n"
+        "🧹 /clear — Effacer la mémoire\n\n"
+        "💬 En groupe : @votre\\_bot votre question",
         parse_mode="Markdown"
     )
 
@@ -202,6 +298,80 @@ async def citation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"💡 *Citation du moment*\n\n_{quote}_\n\n— *{author}*",
         parse_mode="Markdown"
     )
+
+async def blague(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(random.choice(BLAGUES))
+
+async def mdp(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    length = int(args[0]) if args and args[0].isdigit() else 16
+    length = min(max(length, 8), 64)
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    password = ''.join(random.choices(chars, k=length))
+    await update.message.reply_text(
+        f"🔐 *Mot de passe généré*\n\n`{password}`\n\n_{length} caractères — copiez-le maintenant !_",
+        parse_mode="Markdown"
+    )
+
+async def calc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage : /calc 250 * 3.14")
+        return
+    expression = " ".join(args)
+    try:
+        allowed = set("0123456789+-*/().% ")
+        if not all(c in allowed for c in expression):
+            await update.message.reply_text("❌ Expression invalide.")
+            return
+        result = eval(expression)
+        await update.message.reply_text(f"🧮 *{expression} = {result}*", parse_mode="Markdown")
+    except:
+        await update.message.reply_text("❌ Expression invalide. Exemple : /calc 250 * 3.14")
+
+async def top10(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_top10()
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Impossible de récupérer le top 10.")
+
+async def fear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    result = get_fear_greed()
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Impossible de récupérer l'indice.")
+
+async def convert(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) != 3:
+        await update.message.reply_text("Usage : /convert 500 EUR USD")
+        return
+    try:
+        amount = float(args[0])
+        from_curr = args[1]
+        to_curr = args[2]
+        result = get_convert(amount, from_curr, to_curr)
+        if result:
+            await update.message.reply_text(result, parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Devise non trouvée. Exemple : /convert 500 EUR USD")
+    except:
+        await update.message.reply_text("❌ Format invalide. Exemple : /convert 500 EUR USD")
+
+async def priere(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage : /priere Bruxelles")
+        return
+    city = " ".join(args)
+    result = get_prayer_times(city)
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Ville non trouvée. Exemple : /priere Bruxelles")
 
 async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
@@ -213,7 +383,7 @@ async def crypto(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if result:
         await update.message.reply_text(result, parse_mode="Markdown")
     else:
-        await update.message.reply_text("❌ Crypto non trouvée. Essayez : bitcoin, ethereum, solana...")
+        await update.message.reply_text("❌ Crypto non trouvée.")
 
 async def graphique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args
@@ -334,8 +504,15 @@ app.add_handler(CommandHandler("crypto", crypto))
 app.add_handler(CommandHandler("graphique", graphique))
 app.add_handler(CommandHandler("vocal", vocal))
 app.add_handler(CommandHandler("citation", citation))
+app.add_handler(CommandHandler("blague", blague))
+app.add_handler(CommandHandler("mdp", mdp))
+app.add_handler(CommandHandler("calc", calc))
+app.add_handler(CommandHandler("top10", top10))
+app.add_handler(CommandHandler("fear", fear))
+app.add_handler(CommandHandler("convert", convert))
+app.add_handler(CommandHandler("priere", priere))
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Bot démarré avec Groq + Crypto + Graphiques + Vocal + Citations !")
+print("🤖 Bot démarré — toutes les fonctionnalités actives !")
 app.run_polling()
