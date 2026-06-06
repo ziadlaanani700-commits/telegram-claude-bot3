@@ -1,5 +1,5 @@
 groq
 python-telegram-bot
 requests
-gTTS
+edge-tts
 matplotlib
