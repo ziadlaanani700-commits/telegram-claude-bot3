@@ -8,7 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 from groq import Groq
-from gtts import gTTS
+import edge_tts
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -438,9 +438,9 @@ async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         reply = ask_ai(histories[chat_id])
         histories[chat_id].append({"role": "assistant", "content": reply})
-        tts = gTTS(text=reply, lang="fr", tld="ca", slow=False)
         path = f"/tmp/vocal_{chat_id}.mp3"
-        tts.save(path)
+        communicate = edge_tts.Communicate(reply, voice="fr-FR-HenriNeural")
+        await communicate.save(path)
         with open(path, "rb") as f:
             await ctx.bot.send_voice(chat_id=chat_id, voice=f)
         os.remove(path)
