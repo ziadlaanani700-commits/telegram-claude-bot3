@@ -259,6 +259,84 @@ def is_crypto_query(text):
     crypto_words = ["crypto", "prix", "price", "coin", "token", "blockchain"] + list(CRYPTO_IDS.keys())
     return any(w in text.lower() for w in crypto_words)
 
+
+def get_dominance():
+    try:
+        url = "https://api.coingecko.com/api/v3/global"
+        response = requests.get(url, timeout=10)
+        data = response.json()["data"]
+        btc = data["market_cap_percentage"]["btc"]
+        eth = data["market_cap_percentage"]["eth"]
+        others = 100 - btc - eth
+        total = data["total_market_cap"]["usd"]
+        return (
+            f"📊 *Dominance du marché crypto*\n\n"
+            f"₿ Bitcoin : *{btc:.1f}%*\n"
+            f"Ξ Ethereum : *{eth:.1f}%*\n"
+            f"🔵 Autres : *{others:.1f}%*\n\n"
+            f"💰 Market Cap total : ${total:,.0f}"
+        )
+    except Exception as e:
+        print(f"Dominance error: {e}")
+        return None
+
+def get_compare(coin1, coin2):
+    try:
+        ids = []
+        for c in [coin1, coin2]:
+            cid = None
+            for key, val in CRYPTO_IDS.items():
+                if key in c.lower():
+                    cid = val
+                    break
+            if not cid:
+                return None
+            ids.append(cid)
+        
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {"vs_currency": "usd", "ids": ",".join(ids)}
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if len(data) < 2:
+            return None
+        
+        c1, c2 = data[0], data[1]
+        
+        def fmt(coin):
+            change = coin.get("price_change_percentage_24h", 0) or 0
+            emoji = "🟢" if change >= 0 else "🔴"
+            arrow = "▲" if change >= 0 else "▼"
+            return (
+                f"*{coin['name']} ({coin['symbol'].upper()})*\n"
+                f"💵 Prix : ${coin['current_price']:,.4f}\n"
+                f"{emoji} 24h : {arrow}{abs(change):.2f}%\n"
+                f"🏦 Market Cap : ${coin['market_cap']:,.0f}\n"
+                f"📊 Rang : #{coin['market_cap_rank']}"
+            )
+        
+        return f"⚖️ *Comparaison*\n\n{fmt(c1)}\n\nvs\n\n{fmt(c2)}"
+    except Exception as e:
+        print(f"Compare error: {e}")
+        return None
+
+def get_wiki(query):
+    try:
+        url = "https://fr.wikipedia.org/api/rest_v1/page/summary/" + query.replace(" ", "_")
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        title = data.get("title", "")
+        extract = data.get("extract", "")
+        if not extract:
+            return None
+        # Limiter à 500 caractères
+        if len(extract) > 500:
+            extract = extract[:500] + "..."
+        return f"🌐 *{title}*\n\n{extract}"
+    except Exception as e:
+        print(f"Wiki error: {e}")
+        return None
+
 def ask_ai(messages):
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -287,6 +365,9 @@ async def helpYU(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "😂 /blague — Blague aléatoire\n"
         "🔐 /mdp 16 — Générer un mot de passe\n"
         "🧮 /calc 250*3.14 — Calculatrice\n"
+        "📊 /dominance — Dominance Bitcoin/Ethereum\n"
+        "⚖️ /compare btc eth — Comparer 2 cryptos\n"
+        "🌐 /wiki Napoleon — Résumé Wikipedia\n"
         "🧹 /clear — Effacer la mémoire\n\n"
         "💬 En groupe : @votre\\_bot votre question",
         parse_mode="Markdown"
@@ -462,6 +543,39 @@ async def vocal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Erreur vocale. Réessayez.")
         print(f"Erreur vocal : {e}")
 
+
+async def dominance(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_dominance()
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Impossible de récupérer la dominance.")
+
+async def compare(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text("Usage : /compare bitcoin ethereum")
+        return
+    result = get_compare(args[0], args[1])
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Cryptos non trouvées. Exemple : /compare bitcoin ethereum")
+
+async def wiki(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Usage : /wiki Napoleon")
+        return
+    query = " ".join(args)
+    await ctx.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    result = get_wiki(query)
+    if result:
+        await update.message.reply_text(result, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❌ Article non trouvé. Essayez un autre terme.")
+
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
@@ -511,6 +625,9 @@ app.add_handler(CommandHandler("top10", top10))
 app.add_handler(CommandHandler("fear", fear))
 app.add_handler(CommandHandler("convert", convert))
 app.add_handler(CommandHandler("priere", priere))
+app.add_handler(CommandHandler("dominance", dominance))
+app.add_handler(CommandHandler("compare", compare))
+app.add_handler(CommandHandler("wiki", wiki))
 app.add_handler(CallbackQueryHandler(chart_callback, pattern="^chart_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
