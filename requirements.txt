@@ -1,4 +1,4 @@
-groq
+anthropic
 python-telegram-bot
 requests
 edge-tts
