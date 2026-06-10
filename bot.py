@@ -7,16 +7,16 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
-from groq import Groq
+import anthropic
 import edge_tts
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-GROQ_KEY = os.environ["GROQ_KEY"]
+ANTHROPIC_KEY = os.environ["ANTHROPIC_KEY"]
 SERP_KEY = os.environ["SERP_KEY"]
 
-client = Groq(api_key=GROQ_KEY)
+client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 histories = {}
 
 CITATIONS = [
@@ -381,14 +381,13 @@ def get_portfolio_value(chat_id):
     return result
 
 def ask_ai(messages):
-    return client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": """Tu es un assistant IA avec un caractère d'homme fort et sangfroid. Tu es musulman, digne, tu ne fais jamais de shirk. Tu es direct, concis, tu ne perds pas ton temps. Tes réponses sont COURTES — maximum 3-4 lignes sauf si vraiment nécessaire. Si quelqu'un t'insulte ou manque de respect, tu réponds calmement : je perds pas mon temps avec les irrespectueux. Tu restes calme et confiant en toute situation. Tu es expert en crypto et finance. Si on te demande qui t'a créé, tu dis que tu sais pas exactement, sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Si quelqu'un dit salam tu réponds Wa alaykum salam."""},
-            *messages[-10:]
-        ],
-        max_tokens=800
-    ).choices[0].message.content
+    response = client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=800,
+        system="""Tu es un assistant IA avec un caractère d'homme fort et sangfroid. Tu es musulman, digne, tu ne fais jamais de shirk. Tu es direct, concis, tu ne perds pas ton temps. Tes réponses sont COURTES — maximum 3-4 lignes sauf si vraiment nécessaire. Si quelqu'un t'insulte ou manque de respect, tu réponds calmement : je perds pas mon temps avec les irrespectueux. Tu restes calme et confiant en toute situation. Tu es expert en crypto et finance. Si on te demande qui t'a créé, tu dis que tu sais pas exactement, sûrement un gamin... mais sûrement pas un sioniste. Tu réponds en français sauf si on te parle autrement. Si quelqu'un dit salam tu réponds Wa alaykum salam.""",
+        messages=messages[-10:]
+    )
+    return response.content[0].text
 
 # =================== COMMANDES ===================
 
@@ -676,7 +675,7 @@ async def heure(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     city = " ".join(ctx.args).lower()
     from datetime import datetime, timezone, timedelta
-    
+
     TIMEZONES = {
         "tokyo": ("Tokyo 🇯🇵", 9), "japon": ("Tokyo 🇯🇵", 9),
         "paris": ("Paris 🇫🇷", 1), "france": ("Paris 🇫🇷", 1),
@@ -699,16 +698,16 @@ async def heure(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "karachi": ("Karachi 🇵🇰", 5), "lagos": ("Lagos 🇳🇬", 1),
         "nairobi": ("Nairobi 🇰🇪", 3), "johannesburg": ("Johannesburg 🇿🇦", 2),
     }
-    
+
     match = TIMEZONES.get(city)
     if not match:
         await update.message.reply_text("❌ Ville non trouvée. Essayez : Tokyo, Paris, Dubai, New York...")
         return
-    
+
     name, offset = match
     utc_now = datetime.now(timezone.utc)
     local = utc_now + timedelta(hours=offset)
-    
+
     await update.message.reply_text(
         f"🕐 *Heure — {name}*\n\n"
         f"⏰ *{local.strftime('%H:%M:%S')}*\n"
@@ -743,7 +742,7 @@ MUSIQUES = {
 
 async def musique(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    
+
     if not ctx.args:
         keyboard = [
             [InlineKeyboardButton("🎵 Lofi", callback_data="music_lofi"),
@@ -793,6 +792,89 @@ async def music_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await query.message.reply_text("❌ Impossible d'envoyer la musique.")
         print(f"Music callback error: {e}")
+
+
+async def session(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from datetime import datetime, timezone, timedelta
+
+    now_utc = datetime.now(timezone.utc)
+    is_weekend = now_utc.weekday() >= 5
+    ete = now_utc.month in [3,4,5,6,7,8,9,10]
+
+    MARCHES = [
+        {"nom": "Sydney 🇦🇺",    "open_utc": 22, "close_utc": 7,  "local_offset": 11 if ete else 10},
+        {"nom": "Tokyo 🇯🇵",     "open_utc": 0,  "close_utc": 6,  "local_offset": 9},
+        {"nom": "Hong Kong 🇭🇰", "open_utc": 1,  "close_utc": 8,  "local_offset": 8},
+        {"nom": "Frankfurt 🇩🇪", "open_utc": 7,  "close_utc": 15, "local_offset": 2 if ete else 1},
+        {"nom": "Londres 🇬🇧",   "open_utc": 8,  "close_utc": 16, "local_offset": 1 if ete else 0},
+        {"nom": "New York 🇺🇸",  "open_utc": 14, "close_utc": 21, "local_offset": -4 if ete else -5},
+    ]
+
+    bxl_offset = 2 if ete else 1
+    bxl_time = now_utc + timedelta(hours=bxl_offset)
+    now_minutes = now_utc.hour * 60 + now_utc.minute
+
+    def minutes_until(target_h, current_min):
+        target_min = target_h * 60
+        if target_min > current_min:
+            return target_min - current_min
+        else:
+            return (24 * 60) - current_min + target_min
+
+    def fmt(mins):
+        h = mins // 60
+        m = mins % 60
+        return f"{h}h{m:02d}" if h > 0 else f"{m} min"
+
+    text = "🕐 *Sessions des marchés*\n"
+    text += f"📍 Bruxelles : *{bxl_time.strftime('%H:%M')}*\n"
+    if is_weekend:
+        text += "📅 *Weekend — marchés fermés*\n"
+    text += "\n"
+
+    for marche in MARCHES:
+        nom = marche["nom"]
+        open_h = marche["open_utc"]
+        close_h = marche["close_utc"]
+        local_offset = marche["local_offset"]
+        local_time = now_utc + timedelta(hours=local_offset)
+
+        open_min = open_h * 60
+        close_min = close_h * 60
+
+        if open_min < close_min:
+            is_open = open_min <= now_minutes < close_min
+        else:
+            is_open = now_minutes >= open_min or now_minutes < close_min
+
+        if is_weekend:
+            is_open = False
+
+        if is_open:
+            status = "🟢"
+            mins = minutes_until(close_h, now_minutes)
+            detail = f"⏳ Ferme dans *{fmt(mins)}*"
+        else:
+            status = "🔴"
+            if is_weekend:
+                days_until_monday = (7 - now_utc.weekday()) % 7
+                if days_until_monday == 0:
+                    days_until_monday = 7
+                open_monday = now_utc.replace(hour=open_h, minute=0, second=0) + timedelta(days=days_until_monday)
+                diff = open_monday - now_utc
+                total_mins = int(diff.total_seconds() / 60)
+                detail = f"⏳ Ouvre lundi dans *{fmt(total_mins)}*"
+            else:
+                mins = minutes_until(open_h, now_minutes)
+                detail = f"⏳ Ouvre dans *{fmt(mins)}*"
+
+        text += f"{status} *{nom}* ({local_time.strftime('%H:%M')})\n"
+        text += f"   {detail}\n\n"
+
+    text += "🟢 *Crypto* — Ouvert 24h/24 7j/7\n"
+    text += f"{'🟢' if not is_weekend else '🔴'} *Forex* — {'Ouvert lun-ven' if not is_weekend else 'Fermé ce weekend'}"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 async def ping(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     import time
@@ -844,7 +926,7 @@ for cmd, func in [
     ("fear", fear), ("dominance", dominance), ("compare", compare),
     ("convert", convert), ("meteo", meteo), ("wiki", wiki),
     ("priere", priere), ("news", news), ("volume", volume),
-    ("alerte", alerte), ("ajout", ajout), ("portfolio", portfolio), ("resetportfolio", reset_portfolio), ("ping", ping), ("heure", heure), ("musique", musique), ("citation", citation), ("blague", blague),
+    ("alerte", alerte), ("ajout", ajout), ("portfolio", portfolio), ("resetportfolio", reset_portfolio), ("ping", ping), ("session", session), ("heure", heure), ("musique", musique), ("citation", citation), ("blague", blague),
     ("de", de), ("pile", pile), ("vocal", vocal), ("mdp", mdp), ("calc", calc),
 ]:
     app.add_handler(CommandHandler(cmd, func))
